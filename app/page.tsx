@@ -75,6 +75,8 @@ type Invoice = {
   total: number;
   paid: number;
   status: string;
+  customerEmail?: string;
+  lines?: Array<{ productId: number; description: string; quantity: number; unitPrice: number; total: number }>;
 };
 type PurchaseInvoice = {
   id: number;
@@ -656,7 +658,7 @@ function Dashboard(p: any) {
         title={`${greeting}, Auke`}
         desc="Dit is wat er vandaag speelt in je bedrijf."
         action="Nieuwe verkoop"
-        onAction={() => p.go("facturen")}
+        onAction={() => p.setModal("sale")}
       />
       {p.customers.length === 0 &&
       p.invoices.length === 0 &&
@@ -1606,6 +1608,7 @@ function Reports(p: any) {
   );
 }
 function Settings({ notify }: any) {
+  const [activeSection, setActiveSection] = useState("Bedrijfsgegevens");
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyMessage, setPasskeyMessage] = useState("");
   const registerPasskey = async () => {
@@ -1633,12 +1636,9 @@ function Settings({ notify }: any) {
       />
       <div className="settings-layout">
         <div className="settings-nav">
-          <button className="active">Bedrijfsgegevens</button>
-          <button>Facturatie</button>
-          <button>Nummering</button>
-          <button>Documentteksten</button>
-          <button>Back-up & export</button>
-          <button>Wijzigingslogboek</button>
+          {["Bedrijfsgegevens", "Facturatie", "Nummering", "Documentteksten", "Back-up & export", "Wijzigingslogboek"].map((section) => (
+            <button key={section} type="button" className={activeSection === section ? "active" : ""} onClick={() => setActiveSection(section)}>{section}</button>
+          ))}
         </div>
         <form
           className="card settings"
@@ -1647,8 +1647,9 @@ function Settings({ notify }: any) {
             notify("Instellingen veilig opgeslagen");
           }}
         >
-          <h2>Bedrijfsgegevens</h2>
-          <p>Basisinformatie voor je documenten en communicatie.</p>
+          <h2>{activeSection}</h2>
+          <p>{activeSection === "Bedrijfsgegevens" ? "Basisinformatie voor je documenten en communicatie." : `Beheer hier je instellingen voor ${activeSection.toLowerCase()}.`}</p>
+          {activeSection === "Bedrijfsgegevens" ? <>
           <div className="form-grid">
             <label>
               Bedrijfsnaam
@@ -1699,6 +1700,7 @@ function Settings({ notify }: any) {
             Tekst voor factuur zonder btw
             <textarea defaultValue="Op deze factuur wordt geen btw berekend." />
           </label>
+          </> : activeSection === "Facturatie" ? <div className="form-grid"><label>Standaard betaaltermijn<select defaultValue="14"><option>7 dagen</option><option value="14">14 dagen</option><option>30 dagen</option></select></label><label className="toggle-label">Btw berekenen <input type="checkbox" defaultChecked /><span className="toggle" /></label></div> : activeSection === "Nummering" ? <div className="form-grid"><label>Voorvoegsel facturen<input defaultValue="FAC" /></label><label>Volgend factuurnummer<input type="number" min="1" defaultValue="1" /></label></div> : activeSection === "Documentteksten" ? <label>Standaardtekst onder facturen<textarea defaultValue="Bedankt voor je aankoop." /></label> : activeSection === "Back-up & export" ? <div className="settings-placeholder"><p>Download een kopie van je administratie.</p><button type="button" className="secondary" onClick={() => notify("Volledige back-up gedownload")}>⇩ Back-up maken</button></div> : <div className="settings-placeholder"><p>Nog geen wijzigingen geregistreerd.</p></div>}
           <section className="security-settings">
             <div>
               <h2>Passkeys</h2>
@@ -1731,6 +1733,8 @@ function Modal(p: any) {
   const [costCurrency, setCostCurrency] = useState("EUR");
   const [costOriginal, setCostOriginal] = useState(0);
   const [costRate, setCostRate] = useState(1);
+  const [saleCustomerId, setSaleCustomerId] = useState(String(p.selected?.id || "new"));
+  const [saleProductId, setSaleProductId] = useState(Number(p.products?.[0]?.id || 0));
   const type = p.type.split(":")[0];
   const recordId = Number(p.type.split(":")[1]);
   const close = p.close;
@@ -1741,6 +1745,52 @@ function Modal(p: any) {
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if (type === "sale") {
+      const existingCustomer = p.customers.find((customer: Customer) => customer.id === Number(saleCustomerId));
+      const customerId = existingCustomer?.id || Date.now();
+      const customer = existingCustomer || {
+        id: customerId,
+        company: String(f.get("company")),
+        contact: String(f.get("contact")),
+        email: String(f.get("email")),
+        phone: String(f.get("phone")),
+        city: String(f.get("city")),
+        branch: "Anders",
+        status: "Klant",
+        revenue: 0,
+        purchases: 0,
+        lastOrder: "",
+        nextFollow: "",
+        note: "",
+      };
+      const product = p.products.find((item: Product) => item.id === saleProductId);
+      const quantity = Math.max(1, Math.floor(Number(f.get("quantity"))));
+      if (!product || (product.stock !== 999 && product.stock < quantity)) {
+        p.notify("Onvoldoende voorraad voor deze verkoop");
+        return;
+      }
+      const total = Math.round(product.price * quantity * 100) / 100;
+      const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(p.invoices.length + 1).padStart(4, "0")}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 14);
+      const invoice: Invoice = {
+        id: Date.now(), number: invoiceNumber, customer: customer.company, customerEmail: customer.email,
+        date: today, due: dueDate.toISOString().slice(0, 10), total, paid: 0, status: "Verzonden",
+        lines: [{ productId: product.id, description: product.name, quantity, unitPrice: product.price, total }],
+      };
+      p.setInvoices((current: Invoice[]) => [invoice, ...current]);
+      p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? { ...item, stock: item.stock - quantity } : item));
+      p.setCustomers((current: Customer[]) => {
+        const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
+        return existingCustomer ? updated : [{ ...customer, revenue: total, purchases: 1, lastOrder: today }, ...updated];
+      });
+      p.notify(`${invoiceNumber} aangemaakt en voorraad bijgewerkt`);
+      if (customer.email) {
+        const subject = encodeURIComponent(`Factuur ${invoiceNumber}`);
+        const body = encodeURIComponent(`Beste ${customer.contact || customer.company},\n\nBedankt voor je aankoop.\n\n${quantity} × ${product.name} à ${euro(product.price)}\nTotaal: ${euro(total)}\nFactuurnummer: ${invoiceNumber}\nBetaaltermijn: 14 dagen.\n\nMet vriendelijke groet,\nAuke`);
+        setTimeout(() => { window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${subject}&body=${body}`; }, 100);
+      }
+    }
     if (type === "customer") {
       p.setCustomers((a: Customer[]) => [
         ...a,
@@ -1931,7 +1981,7 @@ function Modal(p: any) {
           <div className="quick-grid">
             {[
               ["customer", "♙", "Nieuwe klant"],
-              ["invoice", "▤", "Nieuwe factuur"],
+              ["sale", "▤", "Nieuwe verkoop"],
               ["quote", "◇", "Nieuwe offerte"],
               ["cost", "↘", "Nieuwe uitgave"],
               ["contact", "⌁", "Contactmoment"],
@@ -1976,7 +2026,7 @@ function Modal(p: any) {
           </div>
           <div className="detail-actions">
             <button>＋ Nieuwe offerte</button>
-            <button>＋ Nieuwe verkoop</button>
+            <button onClick={() => p.setModal("sale")}>＋ Nieuwe verkoop</button>
             <button>＋ Factuur</button>
             <button
               className="delete-customer-button"
@@ -2046,6 +2096,7 @@ function Modal(p: any) {
     cost: "Nieuwe uitgave",
     quote: "Nieuwe offerte",
     invoice: "Nieuwe factuur",
+    sale: "Nieuwe verkoop",
     payment: "Betaling registreren",
     contact: "Contactmoment toevoegen",
     "stock-order": "Inkoop registreren",
@@ -2108,6 +2159,22 @@ function Modal(p: any) {
               <textarea name="note" />
             </label>
           </div>
+        )}
+        {type === "sale" && (
+          <>
+            <div className="form-section-title"><span>1</span><div><b>Klantgegevens</b><small>Kies een klant of maak direct een nieuwe aan.</small></div></div>
+            <div className="form-grid">
+              <label className="full">Klant<select value={saleCustomerId} onChange={(event) => setSaleCustomerId(event.target.value)}><option value="new">＋ Nieuwe klant</option>{p.customers.map((customer: Customer) => <option key={customer.id} value={customer.id}>{customer.company}</option>)}</select></label>
+              {saleCustomerId === "new" && <><label>Bedrijfsnaam of naam *<input name="company" required autoFocus /></label><label>Contactpersoon<input name="contact" /></label><label>E-mailadres *<input name="email" type="email" required /></label><label>Telefoonnummer<input name="phone" /></label><label>Plaats<input name="city" /></label></>}
+            </div>
+            <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Kies het product en aantal.</small></div></div>
+            <div className="form-grid">
+              <label>Product *<select value={saleProductId} onChange={(event) => setSaleProductId(Number(event.target.value))} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
+              <label>Aantal *<input name="quantity" type="number" min="1" defaultValue="1" required /></label>
+              <label>Prijs per stuk<input value={p.products.find((product: Product) => product.id === saleProductId)?.price || 0} readOnly /></label>
+            </div>
+            <div className="privacy-note">Na opslaan wordt de factuur aangemaakt, de voorraad afgeboekt en een verzendklare e-mail geopend.</div>
+          </>
         )}
         {type === "product" && (
           <>
@@ -2388,7 +2455,7 @@ function Modal(p: any) {
             Annuleren
           </button>
           <button className="primary">
-            {type === "stock-order" ? "Inkoop opslaan" : type === "stock-writeoff" ? "Voorraad afboeken" : "Opslaan"}
+            {type === "stock-order" ? "Inkoop opslaan" : type === "stock-writeoff" ? "Voorraad afboeken" : type === "sale" ? "Factuur maken en verzenden" : "Opslaan"}
           </button>
         </div>
       </form>
