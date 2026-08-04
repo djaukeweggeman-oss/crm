@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "./supabase";
+import { supabase, supabaseConfigured } from "./supabase";
 
 type View =
   | "dashboard"
@@ -150,6 +150,10 @@ function AuthScreen() {
   };
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!supabaseConfigured) {
+      setMessage("De Supabase-koppeling ontbreekt in deze deployment. Voeg de twee Supabase-variabelen toe in Vercel.");
+      return;
+    }
     setBusy(true);
     setMessage("");
     const form = new FormData(e.currentTarget);
@@ -169,6 +173,10 @@ function AuthScreen() {
     setBusy(false);
   };
   const signInWithPasskey = async () => {
+    if (!supabaseConfigured) {
+      setMessage("De Supabase-koppeling ontbreekt in deze deployment. Voeg de twee Supabase-variabelen toe in Vercel.");
+      return;
+    }
     setPasskeyBusy(true);
     setMessage("");
     const { error } = await supabase.auth.signInWithPasskey();
