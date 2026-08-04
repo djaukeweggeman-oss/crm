@@ -42,6 +42,7 @@ type Product = {
   active: boolean;
   lastPurchaseQty?: number;
   lastPurchaseTotal?: number;
+  stockInitialized?: boolean;
   supplier?: string;
   stockHistory?: Array<{
     id: number;
@@ -356,6 +357,13 @@ export default function Home() {
         const loadedPurchaseInvoices: PurchaseInvoice[] = data.purchase_invoices || [];
         const loadedProducts: Product[] = data.products || [];
         const repairedProducts = loadedProducts.map((product) => {
+          if (!product.stockInitialized && (product.lastPurchaseQty || 0) > 0) {
+            return {
+              ...product,
+              stock: product.stock === 0 ? product.lastPurchaseQty || 0 : product.stock,
+              stockInitialized: true,
+            };
+          }
           if (product.stock !== 0 || !(product.stockHistory || []).length) return product;
           const incoming = (product.stockHistory || []).filter((movement) => movement.type === "inkoop").reduce((sum, movement) => sum + movement.quantity, 0);
           const outgoing = (product.stockHistory || []).filter((movement) => movement.type === "afboeking").reduce((sum, movement) => sum + movement.quantity, 0);
@@ -1843,6 +1851,7 @@ function Modal(p: any) {
           active: true,
           lastPurchaseQty: qty,
           lastPurchaseTotal: total,
+          stockInitialized: true,
           supplier: String(f.get("supplier") || ""),
         },
       ]);
@@ -1861,6 +1870,7 @@ function Modal(p: any) {
                 cost,
                 lastPurchaseQty: qty,
                 lastPurchaseTotal: total,
+                stockInitialized: true,
                 supplier: String(f.get("supplier") || x.supplier || ""),
               }
             : x,
@@ -2593,6 +2603,7 @@ function InvoiceImportModal(p: any) {
             supplier: parsed.supplier || product.supplier,
             lastPurchaseQty: item.quantity,
             lastPurchaseTotal: landedLineTotal,
+            stockInitialized: true,
             stockHistory: [...(product.stockHistory || []), movement],
           };
         } else {
@@ -2609,6 +2620,7 @@ function InvoiceImportModal(p: any) {
             supplier: parsed.supplier,
             lastPurchaseQty: item.quantity,
             lastPurchaseTotal: landedLineTotal,
+            stockInitialized: true,
             stockHistory: [movement],
           });
         }
