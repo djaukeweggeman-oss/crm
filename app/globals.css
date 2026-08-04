@@ -1595,6 +1595,10 @@ td small {
 .archived-invoices > .archived-invoice-row { grid-template-columns: minmax(220px, 1fr) 110px 130px auto; }
 .invoice-file-button { border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
 .invoice-file-button small { display: block; }
+.purchase-invoice-table .invoice-file-button b { color: var(--ink); }
+.purchase-invoice-table td:last-child { white-space: nowrap; }
+.invoice-writeoff-link { display: block; border: 0; background: transparent; color: #a34545; font-size: 9px; font-weight: 700; padding: 4px 0 0; cursor: pointer; }
+.invoice-writeoff-link:hover { text-decoration: underline; }
 @media (max-width: 760px) {
   .invoice-summary { grid-template-columns: 1fr; }
   .invoice-lines > div,.invoice-lines > button { grid-template-columns: 1fr auto; }
