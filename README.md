@@ -18,6 +18,8 @@ Voeg in **Project Settings → Environment Variables** deze twee waarden toe voo
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `OPENAI_API_KEY` (alleen server-side, nooit met `NEXT_PUBLIC_`)
+- `OPENAI_INVOICE_MODEL` (optioneel; standaard `gpt-5.6-luna`)
 
 Start daarna een nieuwe deployment. `npm run build` maakt de vereiste Next.js-uitvoer voor Vercel.
 
@@ -29,6 +31,7 @@ Start daarna een nieuwe deployment. `npm run build` maakt de vereiste Next.js-ui
 - `.env*`, build-uitvoer en lokale werkbestanden worden niet naar Git gestuurd.
 - Productiepagina's sturen CSP- en andere beveiligingsheaders mee.
 - Face ID, Touch ID en andere passkeys kunnen via Supabase WebAuthn worden gebruikt.
+- Inkoopfacturen staan in een privé Supabase Storage-bucket en zijn alleen via een tijdelijk downloadadres te openen.
 
 ### Face ID / passkeys activeren
 

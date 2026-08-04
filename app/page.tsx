@@ -42,6 +42,26 @@ type Product = {
   lastPurchaseQty?: number;
   lastPurchaseTotal?: number;
   supplier?: string;
+  stockHistory?: Array<{
+    id: number;
+    date: string;
+    type: "inkoop" | "afboeking";
+    quantity: number;
+    reason?: string;
+  }>;
+};
+type ParsedInvoice = {
+  supplier: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  currency: string;
+  items: Array<{
+    description: string;
+    sku: string;
+    quantity: number;
+    lineTotal: number;
+    unitCost: number;
+  }>;
 };
 type Invoice = {
   id: number;
@@ -52,6 +72,17 @@ type Invoice = {
   total: number;
   paid: number;
   status: string;
+};
+type PurchaseInvoice = {
+  id: number;
+  number: string;
+  supplier: string;
+  date: string;
+  total: number;
+  currency: string;
+  fileName: string;
+  filePath: string;
+  itemCount: number;
 };
 type Quote = {
   id: number;
@@ -225,6 +256,7 @@ export default function Home() {
   const [customers, setCustomers] = useState(seedCustomers);
   const [products, setProducts] = useState(seedProducts);
   const [invoices, setInvoices] = useState(seedInvoices);
+  const [purchaseInvoices, setPurchaseInvoices] = useState<PurchaseInvoice[]>([]);
   const [quotes, setQuotes] = useState(seedQuotes);
   const [costs, setCosts] = useState(seedCosts);
   const [period, setPeriod] = useState("Maand");
@@ -280,7 +312,7 @@ export default function Home() {
       setSyncStatus("laden");
       const { data, error } = await supabase
         .from("crm_state")
-        .select("customers,products,invoices,quotes,costs")
+        .select("customers,products,invoices,purchase_invoices,quotes,costs")
         .eq("user_id", userId)
         .maybeSingle();
       if (!active) return;
@@ -293,6 +325,7 @@ export default function Home() {
         setCustomers(data.customers || []);
         setProducts(data.products || []);
         setInvoices(data.invoices || []);
+        setPurchaseInvoices(data.purchase_invoices || []);
         setQuotes(data.quotes || []);
         setCosts(data.costs || []);
       } else {
@@ -300,15 +333,25 @@ export default function Home() {
           customers: [],
           products: [],
           invoices: [],
+          purchaseInvoices: [],
           quotes: [],
           costs: [],
         };
         setCustomers(cleaned.customers);
         setProducts(cleaned.products);
         setInvoices(cleaned.invoices);
+        setPurchaseInvoices(cleaned.purchaseInvoices);
         setQuotes(cleaned.quotes);
         setCosts(cleaned.costs);
-        await supabase.from("crm_state").insert({ user_id: userId, ...cleaned });
+        await supabase.from("crm_state").insert({
+          user_id: userId,
+          customers: cleaned.customers,
+          products: cleaned.products,
+          invoices: cleaned.invoices,
+          purchase_invoices: cleaned.purchaseInvoices,
+          quotes: cleaned.quotes,
+          costs: cleaned.costs,
+        });
       }
       setLoaded(true);
       setSyncStatus("opgeslagen");
@@ -322,7 +365,7 @@ export default function Home() {
     if (!loaded || !userId) return;
     setSyncStatus("laden");
     const timer = setTimeout(async () => {
-      const state = { customers, products, invoices, quotes, costs };
+      const state = { customers, products, invoices, purchase_invoices: purchaseInvoices, quotes, costs };
       const { error } = await supabase.from("crm_state").upsert({
         user_id: userId,
         ...state,
@@ -331,7 +374,7 @@ export default function Home() {
       setSyncStatus(error ? "fout" : "opgeslagen");
     }, 500);
     return () => clearTimeout(timer);
-  }, [customers, products, invoices, quotes, costs, loaded, userId]);
+  }, [customers, products, invoices, purchaseInvoices, quotes, costs, loaded, userId]);
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 2800);
@@ -390,7 +433,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, query, setModal, notify }} />
+      <Invoices {...{ invoices, setInvoices, purchaseInvoices, query, setModal, notify }} />
     ) : view === "betalingen" ? (
       <Payments {...{ invoices, setInvoices, setModal, notify }} />
     ) : view === "kosten" ? (
@@ -476,6 +519,8 @@ export default function Home() {
             setProducts,
             invoices,
             setInvoices,
+            purchaseInvoices,
+            setPurchaseInvoices,
             quotes,
             setQuotes,
             costs,
@@ -985,6 +1030,12 @@ function Products(p: any) {
         action="Product toevoegen"
         onAction={() => p.setModal("product")}
       />
+      <div className="toolbar inventory-toolbar">
+        <div />
+        <button className="secondary" onClick={() => p.setModal("invoice-import")}>
+          ⇧ Inkoopfactuur uploaden
+        </button>
+      </div>
       <div className="how-it-works">
         <b>Zo werkt het</b>
         <span>1. Voeg een product toe</span>
@@ -1077,12 +1128,14 @@ function Products(p: any) {
                 <b>{x.stock === 999 ? "Onbeperkt" : `${x.stock} stuks`}</b>
                 {x.stock < x.min && <small>Minimum: {x.min}</small>}
               </div>
-              <button
-                className="purchase-button"
-                onClick={() => p.setModal(`stock-order:${x.id}`)}
-              >
-                ＋ Inkoop registreren
-              </button>
+              <div className="stock-actions">
+                <button className="purchase-button" onClick={() => p.setModal(`stock-order:${x.id}`)}>
+                  ＋ Inkoop
+                </button>
+                <button className="writeoff-button" disabled={x.stock === 999 || x.stock < 1} onClick={() => p.setModal(`stock-writeoff:${x.id}`)}>
+                  − Afboeken
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -1164,6 +1217,14 @@ function Invoices(p: any) {
       s.toLowerCase().includes(p.query.toLowerCase()),
     ),
   );
+  const openPurchaseInvoice = async (invoice: PurchaseInvoice) => {
+    const { data, error } = await supabase.storage.from("invoices").createSignedUrl(invoice.filePath, 60);
+    if (error || !data?.signedUrl) {
+      p.notify("Factuurbestand kon niet worden geopend");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  };
   return (
     <>
       <PageHead
@@ -1213,6 +1274,26 @@ function Invoices(p: any) {
           </>
         )}
       />
+      <div className="card purchase-invoices-card">
+        <div className="card-head">
+          <div>
+            <h2>Geüploade inkoopfacturen</h2>
+            <p>Privé opgeslagen facturen die als voorraad zijn verwerkt</p>
+          </div>
+          <button className="secondary" onClick={() => p.setModal("invoice-import")}>⇧ Factuur uploaden</button>
+        </div>
+        {p.purchaseInvoices.length ? (
+          <div className="invoice-lines archived-invoices">
+            {p.purchaseInvoices.map((invoice: PurchaseInvoice) => (
+              <button key={invoice.id} onClick={() => openPurchaseInvoice(invoice)}>
+                <div><b>{invoice.number || invoice.fileName}</b><small>{invoice.supplier} · {invoice.date || "Datum onbekend"}</small></div>
+                <span>{invoice.itemCount} voorraadregels</span>
+                <strong>{invoice.currency} {invoice.total.toFixed(2)}</strong>
+              </button>
+            ))}
+          </div>
+        ) : <Empty text="Nog geen inkoopfacturen geüpload" />}
+      </div>
     </>
   );
 }
@@ -1576,6 +1657,7 @@ function Modal(p: any) {
   const calculatedUnitCost =
     orderQty > 0 ? Math.round((orderTotal / orderQty) * 100) / 100 : 0;
   const convertedCost = Math.round(costOriginal * costRate * 100) / 100;
+  if (type === "invoice-import") return <InvoiceImportModal {...p} close={close} />;
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -1644,6 +1726,27 @@ function Modal(p: any) {
       p.notify(
         `${qty} stuks toegevoegd — nieuwe kostprijs ${euro(cost)} per stuk`,
       );
+    }
+    if (type === "stock-writeoff") {
+      const product = p.products.find((x: Product) => x.id === recordId);
+      const qty = Math.max(0, Math.floor(Number(f.get("quantity"))));
+      if (!product || qty < 1 || qty > product.stock) return;
+      const reason = String(f.get("reason") || "Handmatige correctie");
+      p.setProducts((a: Product[]) =>
+        a.map((x) =>
+          x.id === recordId
+            ? {
+                ...x,
+                stock: x.stock - qty,
+                stockHistory: [
+                  ...(x.stockHistory || []),
+                  { id: Date.now(), date: today, type: "afboeking", quantity: qty, reason },
+                ],
+              }
+            : x,
+        ),
+      );
+      p.notify(`${qty} stuks afgeboekt van ${product.name}`);
     }
     if (type === "cost") {
       p.setCosts((a: Cost[]) => [
@@ -1868,6 +1971,7 @@ function Modal(p: any) {
     payment: "Betaling registreren",
     contact: "Contactmoment toevoegen",
     "stock-order": "Inkoop registreren",
+    "stock-writeoff": "Voorraad afboeken",
   };
   return (
     <div
@@ -2013,6 +2117,31 @@ function Modal(p: any) {
                 calculatedUnitCost,
               }}
             />
+          </>
+        )}
+        {type === "stock-writeoff" && (
+          <>
+            <div className="selected-product">
+              <span>Product</span>
+              <b>{p.products.find((x: Product) => x.id === recordId)?.name}</b>
+              <small>Beschikbaar: {p.products.find((x: Product) => x.id === recordId)?.stock} stuks</small>
+            </div>
+            <div className="form-grid">
+              <label>
+                Aantal afboeken *
+                <input name="quantity" type="number" min="1" max={p.products.find((x: Product) => x.id === recordId)?.stock || 1} required autoFocus />
+              </label>
+              <label>
+                Reden *
+                <select name="reason" required>
+                  <option>Verkocht</option>
+                  <option>Beschadigd</option>
+                  <option>Vermist</option>
+                  <option>Eigen gebruik</option>
+                  <option>Voorraadcorrectie</option>
+                </select>
+              </label>
+            </div>
           </>
         )}
         {type === "cost" && (
@@ -2181,10 +2310,187 @@ function Modal(p: any) {
             Annuleren
           </button>
           <button className="primary">
-            {type === "stock-order" ? "Inkoop opslaan" : "Opslaan"}
+            {type === "stock-order" ? "Inkoop opslaan" : type === "stock-writeoff" ? "Voorraad afboeken" : "Opslaan"}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function InvoiceImportModal(p: any) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [parsed, setParsed] = useState<ParsedInvoice | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const analyse = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const file = form.get("invoice");
+    if (!(file instanceof File) || !file.size) {
+      setError("Kies eerst een PDF-, JPG- of PNG-factuur.");
+      setBusy(false);
+      return;
+    }
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setError("Je sessie is verlopen. Log opnieuw in.");
+      setBusy(false);
+      return;
+    }
+    try {
+      const response = await fetch("/api/invoices/parse", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Factuur kon niet worden gelezen.");
+      setParsed(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Factuur kon niet worden gelezen.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyInventory = async () => {
+    if (!parsed || !selectedFile) return;
+    setBusy(true);
+    setError("");
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (!user) {
+      setError("Je sessie is verlopen. Log opnieuw in.");
+      setBusy(false);
+      return;
+    }
+    const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-100);
+    const filePath = `${user.id}/${crypto.randomUUID()}-${safeName}`;
+    const { error: uploadError } = await supabase.storage
+      .from("invoices")
+      .upload(filePath, selectedFile, { contentType: selectedFile.type, upsert: false });
+    if (uploadError) {
+      setError("De factuur kon niet veilig worden opgeslagen. Controleer de Supabase Storage-instellingen.");
+      setBusy(false);
+      return;
+    }
+    const now = Date.now();
+    p.setProducts((current: Product[]) => {
+      const next = [...current];
+      parsed.items.forEach((item, index) => {
+        const sku = item.sku.trim().toLowerCase();
+        const description = item.description.trim().toLowerCase();
+        const existingIndex = next.findIndex((product) =>
+          (sku && product.sku.trim().toLowerCase() === sku) ||
+          product.name.trim().toLowerCase() === description,
+        );
+        const movement = {
+          id: now + index,
+          date: parsed.invoiceDate || today,
+          type: "inkoop" as const,
+          quantity: item.quantity,
+          reason: `Factuur ${parsed.invoiceNumber || "zonder nummer"}`,
+        };
+        if (existingIndex >= 0) {
+          const product = next[existingIndex];
+          next[existingIndex] = {
+            ...product,
+            stock: product.stock === 999 ? 999 : product.stock + item.quantity,
+            cost: item.unitCost,
+            supplier: parsed.supplier || product.supplier,
+            lastPurchaseQty: item.quantity,
+            lastPurchaseTotal: item.lineTotal,
+            stockHistory: [...(product.stockHistory || []), movement],
+          };
+        } else {
+          next.push({
+            id: now + index,
+            name: item.description,
+            sku: item.sku || `AUTO-${String(now + index).slice(-6)}`,
+            category: "Overig",
+            cost: item.unitCost,
+            price: item.unitCost,
+            stock: item.quantity,
+            min: 0,
+            active: true,
+            supplier: parsed.supplier,
+            lastPurchaseQty: item.quantity,
+            lastPurchaseTotal: item.lineTotal,
+            stockHistory: [movement],
+          });
+        }
+      });
+      return next;
+    });
+    p.setPurchaseInvoices((current: PurchaseInvoice[]) => [
+      {
+        id: Date.now(),
+        number: parsed.invoiceNumber,
+        supplier: parsed.supplier,
+        date: parsed.invoiceDate,
+        total: parsed.items.reduce((sum, item) => sum + item.lineTotal, 0),
+        currency: parsed.currency || "EUR",
+        fileName: selectedFile.name,
+        filePath,
+        itemCount: parsed.items.length,
+      },
+      ...current,
+    ]);
+    p.notify(`${parsed.items.length} factuurregels als voorraad verwerkt`);
+    p.close();
+  };
+
+  return (
+    <div className="modal-wrap" onMouseDown={(event) => event.target === event.currentTarget && p.close()}>
+      <div className="modal invoice-import-modal">
+        <button type="button" className="modal-close" onClick={p.close}>×</button>
+        <h2>Inkoopfactuur verwerken</h2>
+        <p>Upload een PDF of foto. Controleer altijd de herkenning voordat je de voorraad bijwerkt.</p>
+        {!parsed ? (
+          <form onSubmit={analyse}>
+            <label className="invoice-dropzone">
+              <span>▤</span>
+              <b>Selecteer een inkoopfactuur</b>
+              <small>PDF, JPG of PNG · maximaal 10 MB</small>
+              <input name="invoice" type="file" accept="application/pdf,image/jpeg,image/png" required onChange={(event) => setSelectedFile(event.target.files?.[0] || null)} />
+            </label>
+            {error && <div className="auth-message">{error}</div>}
+            <div className="privacy-note">Na jouw bevestiging wordt het originele bestand privé bewaard onder Facturen.</div>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={p.close}>Annuleren</button>
+              <button className="primary" disabled={busy}>{busy ? "Factuur analyseren…" : "Factuur analyseren"}</button>
+            </div>
+          </form>
+        ) : (
+          <div>
+            <div className="invoice-summary">
+              <div><small>Leverancier</small><b>{parsed.supplier || "Niet herkend"}</b></div>
+              <div><small>Factuurnummer</small><b>{parsed.invoiceNumber || "Niet herkend"}</b></div>
+              <div><small>Datum</small><b>{parsed.invoiceDate || "Niet herkend"}</b></div>
+            </div>
+            <div className="invoice-lines">
+              {parsed.items.map((item, index) => (
+                <div key={`${item.sku}-${index}`}>
+                  <div><b>{item.description}</b><small>{item.sku || "Geen SKU"}</small></div>
+                  <span>{item.quantity} stuks</span>
+                  <strong>{euro(item.unitCost)} / stuk</strong>
+                </div>
+              ))}
+            </div>
+            <div className="privacy-note">Controleer aantallen en bedragen. Automatische herkenning kan fouten maken.</div>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setParsed(null)}>Andere factuur</button>
+              <button type="button" className="primary" disabled={busy} onClick={applyInventory}>{busy ? "Opslaan…" : "Factuur bewaren en voorraad bijboeken"}</button>
+            </div>
+            {error && <div className="auth-message">{error}</div>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
