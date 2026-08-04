@@ -101,6 +101,7 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   page.drawText(`Betaal uiterlijk op ${data.due} onder vermelding van ${data.number}.`, { x: left + 14, y: 145, size: 9, font: regular, color: ink });
   page.drawText("Bedankt voor je aankoop.", { x: left + 14, y: 126, size: 9, font: regular, color: muted });
   page.drawText("WGMN Digital", { x: left, y: 55, size: 9, font: bold, color: green });
+  page.drawText("Auke@wgmndigital.nl", { x: left, y: 42, size: 8, font: regular, color: muted });
   page.drawText("Digitale oplossingen, professioneel geleverd.", { x: 365, y: 55, size: 7, font: regular, color: muted });
 
   const bytes = await pdf.save();
