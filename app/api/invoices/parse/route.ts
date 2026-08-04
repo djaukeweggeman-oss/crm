@@ -35,12 +35,13 @@ export async function POST(request: Request) {
   const schema = {
     type: "object",
     additionalProperties: false,
-    required: ["supplier", "invoiceNumber", "invoiceDate", "currency", "items"],
+    required: ["supplier", "invoiceNumber", "invoiceDate", "currency", "shippingFee", "items"],
     properties: {
       supplier: { type: "string" },
       invoiceNumber: { type: "string" },
       invoiceDate: { type: "string", description: "YYYY-MM-DD, or an empty string" },
       currency: { type: "string" },
+      shippingFee: { type: "number", minimum: 0, description: "Shipping or delivery costs excluding VAT; use 0 when absent" },
       items: {
         type: "array",
         minItems: 1,
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
       input: [{
         role: "user",
         content: [
-          { type: "input_text", text: "Lees deze inkoopfactuur. Geef uitsluitend fysieke voorraadregels terug; sla verzendkosten, korting, btw en diensten over. Gebruik aantallen en regelbedragen exclusief btw. Bereken unitCost als lineTotal gedeeld door quantity. Neem SKU alleen over als die echt op de factuur staat." },
+          { type: "input_text", text: "Lees deze inkoopfactuur. Geef uitsluitend fysieke voorraadregels terug. Herken verzend-, vracht- of bezorgkosten apart als shippingFee, exclusief btw; gebruik 0 als ze ontbreken. Sla korting, btw en diensten over. Gebruik voor productregels aantallen en regelbedragen exclusief btw en exclusief shippingFee. Bereken unitCost als lineTotal gedeeld door quantity. Neem SKU alleen over als die echt op de factuur staat." },
           fileInput,
         ],
       }],

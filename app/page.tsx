@@ -55,6 +55,7 @@ type ParsedInvoice = {
   invoiceNumber: string;
   invoiceDate: string;
   currency: string;
+  shippingFee: number;
   items: Array<{
     description: string;
     sku: string;
@@ -2389,6 +2390,13 @@ function InvoiceImportModal(p: any) {
   const [parsed, setParsed] = useState<ParsedInvoice | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [invoiceExchangeRate, setInvoiceExchangeRate] = useState(1);
+  const parsedItemsSubtotal = parsed?.items.reduce((sum, item) => sum + item.lineTotal, 0) || 0;
+  const displayedUnitCost = (item: ParsedInvoice["items"][number]) => {
+    const shippingShare = parsedItemsSubtotal > 0
+      ? (parsed?.shippingFee || 0) * (item.lineTotal / parsedItemsSubtotal)
+      : (parsed?.shippingFee || 0) / Math.max(1, parsed?.items.length || 1);
+    return Math.round(((item.lineTotal + shippingShare) / item.quantity) * 100) / 100;
+  };
 
   const analyse = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2446,12 +2454,19 @@ function InvoiceImportModal(p: any) {
       return;
     }
     const now = Date.now();
-    const invoiceTotal = parsed.items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const itemsSubtotal = parsed.items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const shippingFee = Math.max(0, parsed.shippingFee || 0);
+    const invoiceTotal = itemsSubtotal + shippingFee;
     const invoiceCurrency = (parsed.currency || "EUR").toUpperCase();
     const euroTotal = Math.round(invoiceTotal * invoiceExchangeRate * 100) / 100;
     p.setProducts((current: Product[]) => {
       const next = [...current];
       parsed.items.forEach((item, index) => {
+        const shippingShare = itemsSubtotal > 0
+          ? shippingFee * (item.lineTotal / itemsSubtotal)
+          : shippingFee / parsed.items.length;
+        const landedLineTotal = item.lineTotal + shippingShare;
+        const landedUnitCost = Math.round((landedLineTotal / item.quantity) * 100) / 100;
         const sku = item.sku.trim().toLowerCase();
         const description = item.description.trim().toLowerCase();
         const existingIndex = next.findIndex((product) =>
@@ -2470,10 +2485,10 @@ function InvoiceImportModal(p: any) {
           next[existingIndex] = {
             ...product,
             stock: product.stock === 999 ? 999 : product.stock + item.quantity,
-            cost: item.unitCost,
+            cost: landedUnitCost,
             supplier: parsed.supplier || product.supplier,
             lastPurchaseQty: item.quantity,
-            lastPurchaseTotal: item.lineTotal,
+            lastPurchaseTotal: landedLineTotal,
             stockHistory: [...(product.stockHistory || []), movement],
           };
         } else {
@@ -2482,14 +2497,14 @@ function InvoiceImportModal(p: any) {
             name: item.description,
             sku: item.sku || `AUTO-${String(now + index).slice(-6)}`,
             category: "Overig",
-            cost: item.unitCost,
-            price: item.unitCost,
+            cost: landedUnitCost,
+            price: landedUnitCost,
             stock: item.quantity,
             min: 0,
             active: true,
             supplier: parsed.supplier,
             lastPurchaseQty: item.quantity,
-            lastPurchaseTotal: item.lineTotal,
+            lastPurchaseTotal: landedLineTotal,
             stockHistory: [movement],
           });
         }
@@ -2557,13 +2572,14 @@ function InvoiceImportModal(p: any) {
               <div><small>Leverancier</small><b>{parsed.supplier || "Niet herkend"}</b></div>
               <div><small>Factuurnummer</small><b>{parsed.invoiceNumber || "Niet herkend"}</b></div>
               <div><small>Datum</small><b>{parsed.invoiceDate || "Niet herkend"}</b></div>
+              <div><small>Verzendkosten</small><b>{parsed.currency || "EUR"} {(parsed.shippingFee || 0).toFixed(2)}</b></div>
             </div>
             <div className="invoice-lines">
               {parsed.items.map((item, index) => (
                 <div key={`${item.sku}-${index}`}>
                   <div><b>{item.description}</b><small>{item.sku || "Geen SKU"}</small></div>
                   <span>{item.quantity} stuks</span>
-                  <strong>{euro(item.unitCost)} / stuk</strong>
+                  <strong>{euro(displayedUnitCost(item))} / stuk incl. verzending</strong>
                 </div>
               ))}
             </div>
