@@ -872,17 +872,14 @@ function Kpi({ icon, label, value, trend, sub, warn, danger, onClick }: any) {
 function Chart({ period, invoices=[] }: { period: string; invoices?:Invoice[] }) {
   const labels=period === "Week"?["ma","di","wo","do","vr","za","zo"]:period === "Jaar"?["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"]:["1","2","3","4","5","6","7","8","9","10","11","12"];
   const amounts=labels.map((_,index)=>invoices.filter((invoice)=>period==="Jaar"?new Date(invoice.date).getMonth()===index:period==="Week"?((new Date(invoice.date).getDay()+6)%7)===index:Math.min(11,Math.floor((new Date(invoice.date).getDate()-1)/3))===index).reduce((sum,invoice)=>sum+invoice.total,0));
-  const max=Math.max(...amounts,1);
-  const bars=amounts.map(amount=>Math.max(amount?6:0,amount/max*100));
+  const scaleMax=Math.max(...amounts,1);
+  const bars=amounts.map(amount=>Math.max(amount?6:0,amount/scaleMax*100));
+  const axisLabels=Array.from({length:6},(_,index)=>scaleMax*(5-index)/5);
+  const axisEuro=(amount:number)=>amount>=1000?`€ ${(amount/1000).toLocaleString("nl-NL",{maximumFractionDigits:1})}k`:`€ ${amount.toLocaleString("nl-NL",{maximumFractionDigits:2})}`;
   return (
     <div className="chart">
       <div className="ylabels">
-        <span>€ 5k</span>
-        <span>€ 4k</span>
-        <span>€ 3k</span>
-        <span>€ 2k</span>
-        <span>€ 1k</span>
-        <span>€ 0</span>
+        {axisLabels.map((amount,index)=><span key={index}>{axisEuro(amount)}</span>)}
       </div>
       <div className="bars">
         {bars.map((b, i) => (
