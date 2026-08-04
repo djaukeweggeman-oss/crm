@@ -148,7 +148,12 @@ function AuthScreen() {
     const result = mode === "login"
       ? await supabase.auth.signInWithPassword({ email, password })
       : await supabase.auth.signUp({ email, password });
-    if (result.error) setMessage(result.error.message);
+    if (result.error)
+      setMessage(
+        mode === "login"
+          ? "Inloggen is niet gelukt. Controleer je e-mailadres en wachtwoord."
+          : "Account aanmaken is niet gelukt. Controleer de gegevens of probeer het later opnieuw.",
+      );
     else if (mode === "signup" && !result.data.session)
       setMessage("Controleer je e-mail om je account te bevestigen.");
     setBusy(false);
@@ -161,7 +166,7 @@ function AuthScreen() {
         <h1>{mode === "login" ? "Welkom terug, Auke" : "Maak je beveiligde account"}</h1>
         <form onSubmit={submit}>
           <label>E-mailadres<input name="email" type="email" required autoComplete="email" /></label>
-          <label>Wachtwoord<input name="password" type="password" minLength={8} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
+          <label>Wachtwoord<input name="password" type="password" minLength={12} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
           {message && <div className="auth-message">{message}</div>}
           <button className="primary" disabled={busy}>{busy ? "Even wachten…" : mode === "login" ? "Inloggen" : "Account aanmaken"}</button>
         </form>
@@ -192,6 +197,13 @@ export default function Home() {
   const [syncStatus, setSyncStatus] = useState<"laden" | "opgeslagen" | "fout">("laden");
 
   useEffect(() => {
+    // Verwijder een eventuele oude, onversleutelde browserkopie van de CRM-data
+    // en oude Supabase-sessies uit localStorage.
+    localStorage.removeItem("nfc-administratie");
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("sb-") && key.endsWith("-auth-token"))
+      .forEach((key) => localStorage.removeItem(key));
+
     supabase.auth.getSession().then(({ data }) => {
       setUserId(data.session?.user.id ?? null);
       setAuthReady(true);
@@ -202,6 +214,23 @@ export default function Home() {
     });
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    const timeoutMs = 30 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void supabase.auth.signOut(), timeoutMs);
+    };
+    const events = ["pointerdown", "keydown", "touchstart"] as const;
+    events.forEach((event) => window.addEventListener(event, resetTimer, { passive: true }));
+    resetTimer();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((event) => window.removeEventListener(event, resetTimer));
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -229,16 +258,12 @@ export default function Home() {
         setQuotes(data.quotes || []);
         setCosts(data.costs || []);
       } else {
-        const saved = localStorage.getItem("nfc-administratie");
-        const local = saved
-          ? JSON.parse(saved)
-          : { customers: [], products: [], invoices: [], quotes: [], costs: [] };
         const cleaned = {
-          customers: (local.customers || []).filter((x: Customer) => x.id > 100),
-          products: (local.products || []).filter((x: Product) => x.id > 100),
-          invoices: (local.invoices || []).filter((x: Invoice) => x.id > 100),
-          quotes: (local.quotes || []).filter((x: Quote) => x.id > 100),
-          costs: (local.costs || []).filter((x: Cost) => x.id > 100),
+          customers: [],
+          products: [],
+          invoices: [],
+          quotes: [],
+          costs: [],
         };
         setCustomers(cleaned.customers);
         setProducts(cleaned.products);
@@ -260,7 +285,6 @@ export default function Home() {
     setSyncStatus("laden");
     const timer = setTimeout(async () => {
       const state = { customers, products, invoices, quotes, costs };
-      localStorage.setItem("nfc-administratie", JSON.stringify(state));
       const { error } = await supabase.from("crm_state").upsert({
         user_id: userId,
         ...state,

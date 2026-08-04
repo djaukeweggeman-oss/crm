@@ -12,7 +12,9 @@ create table if not exists public.crm_state (
 );
 
 alter table public.crm_state enable row level security;
+alter table public.crm_state force row level security;
 
+revoke all on table public.crm_state from public;
 revoke all on table public.crm_state from anon;
 grant select, insert, update, delete on table public.crm_state to authenticated;
 
@@ -40,4 +42,3 @@ create policy "Gebruikers verwijderen eigen CRM"
 on public.crm_state for delete
 to authenticated
 using ((select auth.uid()) = user_id);
-
