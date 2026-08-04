@@ -1561,6 +1561,12 @@ td small {
 .security-settings h2 { font-size: 15px; margin: 0 0 4px; }
 .security-settings p { color: var(--muted); font-size: 11px; margin: 0; }
 .security-settings .auth-message { grid-column: 1 / 3; }
+.passkey-setup-banner { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(18,35,30,.48); backdrop-filter: blur(4px); }
+.passkey-setup-banner > div { width: min(420px,100%); padding: 30px; border-radius: 15px; background: white; box-shadow: 0 24px 80px rgba(0,0,0,.2); text-align: center; }
+.passkey-setup-banner h2 { margin: 10px 0 7px; }
+.passkey-setup-banner p { color: var(--muted); line-height: 1.55; margin: 0 0 18px; }
+.passkey-setup-banner .primary { width: 100%; margin-top: 14px; }
+.passkey-symbol { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto; border-radius: 50%; background: var(--green2); color: var(--green); font-size: 25px; }
 
 .inventory-toolbar { margin-top: -10px; justify-content: flex-end; }
 .stock-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

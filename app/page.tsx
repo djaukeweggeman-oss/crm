@@ -214,8 +214,8 @@ function AuthScreen() {
     if (error)
       setMessage(
         error.code === "passkey_disabled"
-          ? "Face ID-login moet nog worden ingeschakeld in Supabase."
-          : "Inloggen met Face ID of passkey is niet gelukt of geannuleerd.",
+          ? "Passkey-login moet nog worden ingeschakeld in Supabase."
+          : "Inloggen met een passkey is niet gelukt of geannuleerd.",
       );
     setPasskeyBusy(false);
   };
@@ -235,7 +235,7 @@ function AuthScreen() {
           <>
             <div className="auth-divider"><span>of</span></div>
             <button type="button" className="passkey-button" disabled={passkeyBusy} onClick={signInWithPasskey}>
-              ◉ {passkeyBusy ? "Face ID openen…" : "Inloggen met Face ID / passkey"}
+              ◉ {passkeyBusy ? "Passkey openen…" : "Inloggen met passkey"}
             </button>
           </>
         )}
@@ -265,6 +265,9 @@ export default function Home() {
   const [authReady, setAuthReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"laden" | "opgeslagen" | "fout">("laden");
+  const [needsPasskey, setNeedsPasskey] = useState(false);
+  const [passkeySetupBusy, setPasskeySetupBusy] = useState(false);
+  const [passkeySetupError, setPasskeySetupError] = useState("");
 
   useEffect(() => {
     // Verwijder een eventuele oude, onversleutelde browserkopie van de CRM-data
@@ -301,6 +304,27 @@ export default function Home() {
       events.forEach((event) => window.removeEventListener(event, resetTimer));
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !("PublicKeyCredential" in window)) return;
+    let active = true;
+    supabase.auth.passkey.list().then(({ data, error }) => {
+      if (active && !error && Array.isArray(data) && data.length === 0) setNeedsPasskey(true);
+    });
+    return () => { active = false; };
+  }, [userId]);
+
+  const setupPasskey = async () => {
+    setPasskeySetupBusy(true);
+    setPasskeySetupError("");
+    const { error } = await supabase.auth.registerPasskey();
+    if (error) setPasskeySetupError("De passkey kon niet worden gekoppeld of de actie is geannuleerd.");
+    else {
+      setNeedsPasskey(false);
+      notify("Passkey gekoppeld — voortaan kun je zonder wachtwoord inloggen");
+    }
+    setPasskeySetupBusy(false);
+  };
 
   useEffect(() => {
     if (!userId) {
@@ -532,6 +556,20 @@ export default function Home() {
         />
       )}
       {toast && <div className="toast">✓ {toast}</div>}
+      {needsPasskey && (
+        <div className="passkey-setup-banner" role="dialog" aria-modal="true" aria-labelledby="passkey-title">
+          <div>
+            <span className="passkey-symbol">◉</span>
+            <h2 id="passkey-title">Maak je passkey aan</h2>
+            <p>Koppel dit apparaat één keer. Daarna log je rechtstreeks in met je passkey, zonder e-mailadres of wachtwoord.</p>
+            {passkeySetupError && <div className="auth-message">{passkeySetupError}</div>}
+            <button className="primary" disabled={passkeySetupBusy} onClick={setupPasskey}>
+              {passkeySetupBusy ? "Passkey koppelen…" : "Passkey aanmaken"}
+            </button>
+            <button className="auth-switch" onClick={() => setNeedsPasskey(false)}>Later instellen</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1541,7 +1579,7 @@ function Settings({ notify }: any) {
         ? error.code === "passkey_disabled"
           ? "Schakel passkeys eerst in via Supabase Authentication → Passkeys."
           : "Koppelen is niet gelukt of geannuleerd. Probeer het opnieuw."
-        : "Face ID / passkey is gekoppeld. Je kunt deze voortaan gebruiken bij het inloggen.",
+        : "Passkey is gekoppeld. Je kunt deze voortaan gebruiken bij het inloggen.",
     );
     setPasskeyBusy(false);
   };
@@ -1621,11 +1659,11 @@ function Settings({ notify }: any) {
           </label>
           <section className="security-settings">
             <div>
-              <h2>Face ID en passkeys</h2>
+              <h2>Passkeys</h2>
               <p>Koppel dit apparaat om voortaan veilig zonder wachtwoord in te loggen.</p>
             </div>
             <button type="button" className="secondary" disabled={passkeyBusy} onClick={registerPasskey}>
-              ◉ {passkeyBusy ? "Koppelen…" : "Face ID / passkey koppelen"}
+              ◉ {passkeyBusy ? "Koppelen…" : "Passkey koppelen"}
             </button>
             {passkeyMessage && <div className="auth-message">{passkeyMessage}</div>}
           </section>
