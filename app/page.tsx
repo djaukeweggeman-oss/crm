@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase, supabaseConfigured } from "./supabase";
+import { createInvoicePdf, downloadInvoicePdf } from "./invoice-pdf";
 
 type View =
   | "dashboard"
@@ -501,7 +502,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, query, setModal, notify }} />
+      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify }} />
     ) : view === "inkoopfacturen" ? (
       <PurchaseInvoices {...{ purchaseInvoices, setPurchaseInvoices, products, setProducts, setCosts, query, setModal, notify }} />
     ) : view === "betalingen" ? (
@@ -1319,7 +1320,13 @@ function Invoices(p: any) {
         rows={rows}
         actions={(i: Invoice) => (
           <>
-            <button onClick={() => p.notify(`${i.number} als PDF klaargezet`)}>
+            <button onClick={async () => {
+              if (!i.lines?.length) return p.notify("Deze oudere factuur bevat nog geen productregels voor een PDF");
+              const customer = p.customers.find((item: Customer) => item.company === i.customer);
+              const blob = await createInvoicePdf({ number: i.number, date: i.date, due: i.due, customer: { company: i.customer, contact: customer?.contact, email: i.customerEmail || customer?.email, city: customer?.city }, lines: i.lines, total: i.total });
+              downloadInvoicePdf(blob, i.number);
+              p.notify(`${i.number}.pdf gedownload`);
+            }}>
               PDF
             </button>
             {i.status !== "Betaald" && (
@@ -1759,7 +1766,7 @@ function Modal(p: any) {
     orderQty > 0 ? Math.round((orderTotal / orderQty) * 100) / 100 : 0;
   const convertedCost = Math.round(costOriginal * costRate * 100) / 100;
   if (type === "invoice-import") return <InvoiceImportModal {...p} close={close} />;
-  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     if (type === "sale") {
@@ -1805,10 +1812,12 @@ function Modal(p: any) {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
         return existingCustomer ? updated : [{ ...customer, revenue: total, purchases: 1, lastOrder: today }, ...updated];
       });
-      p.notify(`${invoiceNumber} aangemaakt en voorraad bijgewerkt`);
+      const pdf = await createInvoicePdf({ number: invoice.number, date: invoice.date, due: invoice.due, customer: { company: customer.company, contact: customer.contact, email: customer.email, city: customer.city }, lines: invoice.lines || [], total: invoice.total });
+      downloadInvoicePdf(pdf, invoice.number);
+      p.notify(`${invoiceNumber}.pdf aangemaakt en voorraad bijgewerkt`);
       if (customer.email) {
         const subject = encodeURIComponent(`Factuur ${invoiceNumber}`);
-        const body = encodeURIComponent(`Beste ${customer.contact || customer.company},\n\nBedankt voor je aankoop.\n\n${quantity} × ${product.name} à ${euro(product.price)}\nTotaal: ${euro(total)}\nFactuurnummer: ${invoiceNumber}\nBetaaltermijn: 14 dagen.\n\nMet vriendelijke groet,\nAuke`);
+        const body = encodeURIComponent(`Beste ${customer.contact || customer.company},\n\nIn de bijlage vind je factuur ${invoiceNumber}. Het PDF-bestand is zojuist gedownload en kan aan deze e-mail worden toegevoegd.\n\nMet vriendelijke groet,\nAuke`);
         setTimeout(() => { window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${subject}&body=${body}`; }, 100);
       }
     }
