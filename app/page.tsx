@@ -645,9 +645,6 @@ function Dashboard(p: any) {
       : amsterdamHour < 18
         ? "Goedemiddag"
         : "Goedenavond";
-  const overdue = p.invoices
-    .filter((i: Invoice) => i.status === "Te laat")
-    .reduce((a: number, i: Invoice) => a + i.total - i.paid, 0);
   const followUps = p.customers.filter(
     (c: Customer) => c.nextFollow && c.nextFollow <= today,
   );
@@ -713,22 +710,6 @@ function Dashboard(p: any) {
           label="Omzet deze maand"
           value={euro(p.monthlyRevenue)}
           sub={`${p.invoices.filter((i: Invoice) => i.date.startsWith(today.slice(0, 7))).length} facturen`}
-          onClick={() => p.go("facturen")}
-        />
-        <Kpi
-          icon="▤"
-          label="Openstaand"
-          value={euro(p.outstanding)}
-          sub={`${p.invoices.filter((i: Invoice) => i.total > i.paid).length} facturen`}
-          warn
-          onClick={() => p.go("facturen")}
-        />
-        <Kpi
-          icon="!"
-          label="Achterstallig"
-          value={euro(overdue)}
-          sub={`${p.invoices.filter((i: Invoice) => i.status === "Te laat").length} facturen`}
-          danger
           onClick={() => p.go("facturen")}
         />
         <Kpi
