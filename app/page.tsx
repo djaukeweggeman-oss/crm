@@ -180,19 +180,8 @@ function Empty({ text }: { text: string }) {
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [passkeyBusy, setPasskeyBusy] = useState(false);
-  const signupErrorMessage = (code?: string) => {
-    if (code === "weak_password") return "Kies een sterker wachtwoord van minimaal 12 tekens.";
-    if (code === "email_address_invalid") return "Vul een geldig e-mailadres in.";
-    if (code === "email_exists" || code === "user_already_exists") return "Voor dit e-mailadres bestaat al een account. Kies Inloggen.";
-    if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit") return "Er zijn te veel pogingen gedaan. Wacht enkele minuten en probeer opnieuw.";
-    if (code === "signup_disabled") return "Nieuwe accounts zijn momenteel uitgeschakeld in Supabase.";
-    if (code === "email_address_not_authorized") return "Dit e-mailadres mag geen account aanmaken. Controleer de Supabase-instellingen.";
-    return "Account aanmaken is niet gelukt. Controleer of e-mailregistratie in Supabase is ingeschakeld.";
-  };
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!supabaseConfigured) {
@@ -204,58 +193,23 @@ function AuthScreen() {
     const form = new FormData(e.currentTarget);
     const email = String(form.get("email"));
     const password = String(form.get("password"));
-    const result = mode === "login"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
+    const result = await supabase.auth.signInWithPassword({ email, password });
     if (result.error)
-      setMessage(
-        mode === "login"
-          ? "Inloggen is niet gelukt. Controleer je e-mailadres en wachtwoord."
-          : signupErrorMessage(result.error.code),
-      );
-    else if (mode === "signup" && !result.data.session)
-      setMessage("Controleer je e-mail om je account te bevestigen.");
+      setMessage("Inloggen is niet gelukt. Controleer je e-mailadres en wachtwoord.");
     setBusy(false);
-  };
-  const signInWithPasskey = async () => {
-    if (!supabaseConfigured) {
-      setMessage("De Supabase-koppeling ontbreekt in deze deployment. Voeg de twee Supabase-variabelen toe in Vercel.");
-      return;
-    }
-    setPasskeyBusy(true);
-    setMessage("");
-    const { error } = await supabase.auth.signInWithPasskey();
-    if (error)
-      setMessage(
-        error.code === "passkey_disabled"
-          ? "Passkey-login moet nog worden ingeschakeld in Supabase."
-          : "Inloggen met een passkey is niet gelukt of geannuleerd.",
-      );
-    setPasskeyBusy(false);
   };
   return (
     <div className="auth-page">
       <div className="auth-panel">
         <div className="logo">W</div>
         <span className="eyebrow">WGMN DIGITAL</span>
-        <h1>{mode === "login" ? "Welkom terug, Auke" : "Maak je beveiligde account"}</h1>
+        <h1>Welkom terug, Auke</h1>
         <form onSubmit={submit}>
           <label>E-mailadres<input name="email" type="email" required autoComplete="email" /></label>
-          <label>Wachtwoord<input name="password" type="password" minLength={12} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
+          <label>Wachtwoord<input name="password" type="password" minLength={12} required autoComplete="current-password" /></label>
           {message && <div className="auth-message">{message}</div>}
-          <button className="primary" disabled={busy}>{busy ? "Even wachten…" : mode === "login" ? "Inloggen" : "Account aanmaken"}</button>
+          <button className="primary" disabled={busy}>{busy ? "Even wachten…" : "Inloggen"}</button>
         </form>
-        {mode === "login" && (
-          <>
-            <div className="auth-divider"><span>of</span></div>
-            <button type="button" className="passkey-button" disabled={passkeyBusy} onClick={signInWithPasskey}>
-              ◉ {passkeyBusy ? "Passkey openen…" : "Inloggen met passkey"}
-            </button>
-          </>
-        )}
-        <button className="auth-switch" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>
-          {mode === "login" ? "Nog geen account? Account aanmaken" : "Al een account? Inloggen"}
-        </button>
       </div>
     </div>
   );
