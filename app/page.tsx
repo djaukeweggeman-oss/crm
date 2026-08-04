@@ -48,6 +48,7 @@ type Product = {
     type: "inkoop" | "afboeking";
     quantity: number;
     reason?: string;
+    sourceInvoiceId?: number;
   }>;
 };
 type ParsedInvoice = {
@@ -480,7 +481,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, purchaseInvoices, query, setModal, notify }} />
+      <Invoices {...{ invoices, setInvoices, purchaseInvoices, setPurchaseInvoices, products, setProducts, setCosts, query, setModal, notify }} />
     ) : view === "betalingen" ? (
       <Payments {...{ invoices, setInvoices, setModal, notify }} />
     ) : view === "kosten" ? (
@@ -1291,6 +1292,43 @@ function Invoices(p: any) {
     }
     window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
+  const writeOffPurchaseInvoice = async (invoice: PurchaseInvoice) => {
+    const confirmed = window.confirm(
+      `Factuur ${invoice.number || invoice.fileName} afboeken? De kostenpost en bijbehorende voorraad worden teruggedraaid en het bestand wordt verwijderd.`,
+    );
+    if (!confirmed) return;
+    const { error } = await supabase.storage.from("invoices").remove([invoice.filePath]);
+    if (error) {
+      p.notify("Afboeken gestopt: het factuurbestand kon niet veilig worden verwijderd");
+      return;
+    }
+    const reason = `Factuur ${invoice.number || "zonder nummer"}`;
+    const reversedQuantity = p.products.reduce((sum: number, product: Product) =>
+      sum + (product.stockHistory || [])
+        .filter((movement) =>
+          movement.type === "inkoop" &&
+          (movement.sourceInvoiceId === invoice.id ||
+            (!movement.sourceInvoiceId && movement.reason === reason && movement.date === invoice.date)),
+        )
+        .reduce((quantity: number, movement) => quantity + movement.quantity, 0), 0);
+    p.setProducts((current: Product[]) => current.map((product) => {
+      const matching = (product.stockHistory || []).filter((movement) =>
+        movement.type === "inkoop" &&
+        (movement.sourceInvoiceId === invoice.id ||
+          (!movement.sourceInvoiceId && movement.reason === reason && movement.date === invoice.date)),
+      );
+      const quantity = matching.reduce((sum, movement) => sum + movement.quantity, 0);
+      if (quantity === 0) return product;
+      return {
+        ...product,
+        stock: product.stock === 999 ? 999 : Math.max(0, product.stock - quantity),
+        stockHistory: (product.stockHistory || []).filter((movement) => !matching.includes(movement)),
+      };
+    }));
+    p.setPurchaseInvoices((current: PurchaseInvoice[]) => current.filter((item) => item.id !== invoice.id));
+    p.setCosts((current: Cost[]) => current.filter((cost) => cost.sourceInvoiceId !== invoice.id));
+    p.notify(`Factuur afgeboekt en ${reversedQuantity} voorraadstuks teruggedraaid`);
+  };
   return (
     <>
       <PageHead
@@ -1351,11 +1389,12 @@ function Invoices(p: any) {
         {p.purchaseInvoices.length ? (
           <div className="invoice-lines archived-invoices">
             {p.purchaseInvoices.map((invoice: PurchaseInvoice) => (
-              <button key={invoice.id} onClick={() => openPurchaseInvoice(invoice)}>
-                <div><b>{invoice.number || invoice.fileName}</b><small>{invoice.supplier} · {invoice.date || "Datum onbekend"}</small></div>
+              <div key={invoice.id} className="archived-invoice-row">
+                <button className="invoice-file-button" onClick={() => openPurchaseInvoice(invoice)}><b>{invoice.number || invoice.fileName}</b><small>{invoice.supplier} · {invoice.date || "Datum onbekend"}</small></button>
                 <span>{invoice.itemCount} voorraadregels</span>
                 <strong>{invoice.currency} {invoice.total.toFixed(2)}</strong>
-              </button>
+                <button className="writeoff-button" onClick={() => writeOffPurchaseInvoice(invoice)}>− Factuur en voorraad afboeken</button>
+              </div>
             ))}
           </div>
         ) : <Empty text="Nog geen inkoopfacturen geüpload" />}
@@ -2479,6 +2518,7 @@ function InvoiceImportModal(p: any) {
           type: "inkoop" as const,
           quantity: item.quantity,
           reason: `Factuur ${parsed.invoiceNumber || "zonder nummer"}`,
+          sourceInvoiceId: now,
         };
         if (existingIndex >= 0) {
           const product = next[existingIndex];

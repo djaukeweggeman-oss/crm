@@ -1592,6 +1592,9 @@ td small {
 .invoice-lines span,.invoice-lines strong { text-align: right; font-size: 11px; }
 .purchase-invoices-card { margin-top: 20px; padding: 20px; }
 .archived-invoices button:hover { background: #f7faf8; }
+.archived-invoices > .archived-invoice-row { grid-template-columns: minmax(220px, 1fr) 110px 130px auto; }
+.invoice-file-button { border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
+.invoice-file-button small { display: block; }
 @media (max-width: 760px) {
   .invoice-summary { grid-template-columns: 1fr; }
   .invoice-lines > div,.invoice-lines > button { grid-template-columns: 1fr auto; }
