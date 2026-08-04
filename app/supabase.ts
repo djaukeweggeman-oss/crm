@@ -25,5 +25,6 @@ export const supabase = createClient(supabaseUrl || "https://example.supabase.co
     detectSessionInUrl: true,
     storage: sessionStorageAdapter,
     storageKey: "nfc-administratie-auth",
+    experimental: { passkey: true },
   },
 });

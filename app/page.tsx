@@ -138,6 +138,16 @@ function AuthScreen() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const signupErrorMessage = (code?: string) => {
+    if (code === "weak_password") return "Kies een sterker wachtwoord van minimaal 12 tekens.";
+    if (code === "email_address_invalid") return "Vul een geldig e-mailadres in.";
+    if (code === "email_exists" || code === "user_already_exists") return "Voor dit e-mailadres bestaat al een account. Kies Inloggen.";
+    if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit") return "Er zijn te veel pogingen gedaan. Wacht enkele minuten en probeer opnieuw.";
+    if (code === "signup_disabled") return "Nieuwe accounts zijn momenteel uitgeschakeld in Supabase.";
+    if (code === "email_address_not_authorized") return "Dit e-mailadres mag geen account aanmaken. Controleer de Supabase-instellingen.";
+    return "Account aanmaken is niet gelukt. Controleer of e-mailregistratie in Supabase is ingeschakeld.";
+  };
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
@@ -152,11 +162,23 @@ function AuthScreen() {
       setMessage(
         mode === "login"
           ? "Inloggen is niet gelukt. Controleer je e-mailadres en wachtwoord."
-          : "Account aanmaken is niet gelukt. Controleer de gegevens of probeer het later opnieuw.",
+          : signupErrorMessage(result.error.code),
       );
     else if (mode === "signup" && !result.data.session)
       setMessage("Controleer je e-mail om je account te bevestigen.");
     setBusy(false);
+  };
+  const signInWithPasskey = async () => {
+    setPasskeyBusy(true);
+    setMessage("");
+    const { error } = await supabase.auth.signInWithPasskey();
+    if (error)
+      setMessage(
+        error.code === "passkey_disabled"
+          ? "Face ID-login moet nog worden ingeschakeld in Supabase."
+          : "Inloggen met Face ID of passkey is niet gelukt of geannuleerd.",
+      );
+    setPasskeyBusy(false);
   };
   return (
     <div className="auth-page">
@@ -170,6 +192,14 @@ function AuthScreen() {
           {message && <div className="auth-message">{message}</div>}
           <button className="primary" disabled={busy}>{busy ? "Even wachten…" : mode === "login" ? "Inloggen" : "Account aanmaken"}</button>
         </form>
+        {mode === "login" && (
+          <>
+            <div className="auth-divider"><span>of</span></div>
+            <button type="button" className="passkey-button" disabled={passkeyBusy} onClick={signInWithPasskey}>
+              ◉ {passkeyBusy ? "Face ID openen…" : "Inloggen met Face ID / passkey"}
+            </button>
+          </>
+        )}
         <button className="auth-switch" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>
           {mode === "login" ? "Nog geen account? Account aanmaken" : "Al een account? Inloggen"}
         </button>
@@ -1407,6 +1437,25 @@ function Reports(p: any) {
   );
 }
 function Settings({ notify }: any) {
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyMessage, setPasskeyMessage] = useState("");
+  const registerPasskey = async () => {
+    if (!("PublicKeyCredential" in window)) {
+      setPasskeyMessage("Deze browser ondersteunt geen passkeys.");
+      return;
+    }
+    setPasskeyBusy(true);
+    setPasskeyMessage("");
+    const { error } = await supabase.auth.registerPasskey();
+    setPasskeyMessage(
+      error
+        ? error.code === "passkey_disabled"
+          ? "Schakel passkeys eerst in via Supabase Authentication → Passkeys."
+          : "Koppelen is niet gelukt of geannuleerd. Probeer het opnieuw."
+        : "Face ID / passkey is gekoppeld. Je kunt deze voortaan gebruiken bij het inloggen.",
+    );
+    setPasskeyBusy(false);
+  };
   return (
     <>
       <PageHead
@@ -1481,6 +1530,16 @@ function Settings({ notify }: any) {
             Tekst voor factuur zonder btw
             <textarea defaultValue="Op deze factuur wordt geen btw berekend." />
           </label>
+          <section className="security-settings">
+            <div>
+              <h2>Face ID en passkeys</h2>
+              <p>Koppel dit apparaat om voortaan veilig zonder wachtwoord in te loggen.</p>
+            </div>
+            <button type="button" className="secondary" disabled={passkeyBusy} onClick={registerPasskey}>
+              ◉ {passkeyBusy ? "Koppelen…" : "Face ID / passkey koppelen"}
+            </button>
+            {passkeyMessage && <div className="auth-message">{passkeyMessage}</div>}
+          </section>
           <div className="form-actions">
             <button
               type="button"

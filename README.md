@@ -28,6 +28,11 @@ Start daarna een nieuwe deployment. `npm run build` maakt de vereiste Next.js-ui
 - De login-sessie staat alleen in het huidige browsertabblad en verloopt na 30 minuten zonder activiteit.
 - `.env*`, build-uitvoer en lokale werkbestanden worden niet naar Git gestuurd.
 - Productiepagina's sturen CSP- en andere beveiligingsheaders mee.
+- Face ID, Touch ID en andere passkeys kunnen via Supabase WebAuthn worden gebruikt.
+
+### Face ID / passkeys activeren
+
+Open in Supabase **Authentication → Passkeys**, schakel passkeys in en stel een vast RP ID en de toegestane productie-URL in. Gebruikers kunnen daarna onder **Instellingen** een passkey koppelen. Passkey-ondersteuning in Supabase is momenteel experimenteel.
 
 Voer na dependency-updates `npm audit --omit=dev` en `npm run build` uit.
 
