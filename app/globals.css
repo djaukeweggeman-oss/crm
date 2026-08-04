@@ -1599,6 +1599,9 @@ td small {
 .purchase-invoice-table td:last-child { white-space: nowrap; }
 .invoice-writeoff-link { display: block; border: 0; background: transparent; color: #a34545; font-size: 9px; font-weight: 700; padding: 4px 0 0; cursor: pointer; }
 .invoice-writeoff-link:hover { text-decoration: underline; }
+.detail-actions .delete-customer-button { margin-left: auto; border-color: #e6bcbc; color: #a43f3f; }
+.detail-actions .delete-customer-button:hover { background: #fff2f2; }
+.empty-contact-history { margin-top: 10px; border: 1px dashed var(--line); border-radius: 9px; padding: 18px; color: var(--muted); font-size: 11px; }
 @media (max-width: 760px) {
   .invoice-summary { grid-template-columns: 1fr; }
   .invoice-lines > div,.invoice-lines > button { grid-template-columns: 1fr auto; }

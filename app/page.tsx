@@ -1978,6 +1978,19 @@ function Modal(p: any) {
             <button>＋ Nieuwe offerte</button>
             <button>＋ Nieuwe verkoop</button>
             <button>＋ Factuur</button>
+            <button
+              className="delete-customer-button"
+              onClick={() => {
+                if (!window.confirm(`Klant ${p.selected.company} definitief verwijderen?`)) return;
+                p.setCustomers((current: Customer[]) =>
+                  current.filter((customer) => customer.id !== p.selected.id),
+                );
+                p.notify("Klant verwijderd");
+                close();
+              }}
+            >
+              Klant verwijderen
+            </button>
           </div>
           <div className="detail-metrics">
             <div>
@@ -2018,27 +2031,12 @@ function Modal(p: any) {
             </div>
             <div>
               <h3>Interne notitie</h3>
-              <p>{p.selected.note}</p>
+              <p>{p.selected.note || "Nog geen interne notitie."}</p>
               <button className="link">Notitie bewerken</button>
             </div>
           </div>
           <h3>Contactgeschiedenis</h3>
-          <div className="timeline">
-            <div>
-              <i />
-              <b>E-mail gestuurd</b>
-              <small>18 juli 2026 · door Alex</small>
-              <p>
-                Bedankt voor de bestelling en installatie-instructies verstuurd.
-              </p>
-            </div>
-            <div>
-              <i />
-              <b>Telefonisch gesproken</b>
-              <small>11 juli 2026 · door Alex</small>
-              <p>Interesse besproken in tafelstandaards voor het terras.</p>
-            </div>
-          </div>
+          <div className="empty-contact-history">Nog geen contactmomenten geregistreerd.</div>
         </div>
       </div>
     );
