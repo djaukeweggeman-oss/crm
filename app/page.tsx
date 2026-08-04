@@ -354,6 +354,14 @@ export default function Home() {
       }
       if (data) {
         const loadedPurchaseInvoices: PurchaseInvoice[] = data.purchase_invoices || [];
+        const loadedProducts: Product[] = data.products || [];
+        const repairedProducts = loadedProducts.map((product) => {
+          if (product.stock !== 0 || !(product.stockHistory || []).length) return product;
+          const incoming = (product.stockHistory || []).filter((movement) => movement.type === "inkoop").reduce((sum, movement) => sum + movement.quantity, 0);
+          const outgoing = (product.stockHistory || []).filter((movement) => movement.type === "afboeking").reduce((sum, movement) => sum + movement.quantity, 0);
+          const calculatedStock = Math.max(0, incoming - outgoing);
+          return calculatedStock > 0 ? { ...product, stock: calculatedStock } : product;
+        });
         const loadedCosts: Cost[] = data.costs || [];
         const restoredInvoiceCosts: Cost[] = loadedPurchaseInvoices
           .filter(
@@ -375,7 +383,7 @@ export default function Home() {
             sourceInvoiceId: invoice.id,
           }));
         setCustomers(data.customers || []);
-        setProducts(data.products || []);
+        setProducts(repairedProducts);
         setInvoices(data.invoices || []);
         setPurchaseInvoices(loadedPurchaseInvoices);
         setQuotes(data.quotes || []);
@@ -1190,6 +1198,7 @@ function Products(p: any) {
                   − Afboeken
                 </button>
               </div>
+              <button className="edit-price-button" onClick={() => p.setModal(`product-price:${x.id}`)}>Verkoopprijs wijzigen</button>
             </div>
           </div>
         ))}
@@ -1779,7 +1788,11 @@ function Modal(p: any) {
         lines: [{ productId: product.id, description: product.name, quantity, unitPrice: product.price, total }],
       };
       p.setInvoices((current: Invoice[]) => [invoice, ...current]);
-      p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? { ...item, stock: item.stock - quantity } : item));
+      p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? {
+        ...item,
+        stock: item.stock - quantity,
+        stockHistory: [...(item.stockHistory || []), { id: Date.now(), date: today, type: "afboeking", quantity, reason: `Verkoop ${invoiceNumber}` }],
+      } : item));
       p.setCustomers((current: Customer[]) => {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
         return existingCustomer ? updated : [{ ...customer, revenue: total, purchases: 1, lastOrder: today }, ...updated];
@@ -1877,6 +1890,11 @@ function Modal(p: any) {
         ),
       );
       p.notify(`${qty} stuks afgeboekt van ${product.name}`);
+    }
+    if (type === "product-price") {
+      const price = Math.max(0, Number(f.get("price")));
+      p.setProducts((current: Product[]) => current.map((product) => product.id === recordId ? { ...product, price } : product));
+      p.notify(`Verkoopprijs gewijzigd naar ${euro(price)}`);
     }
     if (type === "cost") {
       p.setCosts((a: Cost[]) => [
@@ -2101,6 +2119,7 @@ function Modal(p: any) {
     contact: "Contactmoment toevoegen",
     "stock-order": "Inkoop registreren",
     "stock-writeoff": "Voorraad afboeken",
+    "product-price": "Verkoopprijs wijzigen",
   };
   return (
     <div
@@ -2288,6 +2307,11 @@ function Modal(p: any) {
               </label>
             </div>
           </>
+        )}
+        {type === "product-price" && (
+          <div className="form-grid">
+            <label className="full">Nieuwe verkoopprijs per stuk *<input name="price" type="number" min="0" step=".01" defaultValue={p.products.find((product: Product) => product.id === recordId)?.price || 0} required autoFocus /></label>
+          </div>
         )}
         {type === "cost" && (
           <>

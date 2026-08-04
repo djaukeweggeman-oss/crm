@@ -1602,6 +1602,8 @@ td small {
 .detail-actions .delete-customer-button { margin-left: auto; border-color: #e6bcbc; color: #a43f3f; }
 .detail-actions .delete-customer-button:hover { background: #fff2f2; }
 .empty-contact-history { margin-top: 10px; border: 1px dashed var(--line); border-radius: 9px; padding: 18px; color: var(--muted); font-size: 11px; }
+.edit-price-button { width: 100%; margin-top: 8px; border: 0; background: transparent; color: var(--green); font-size: 10px; font-weight: 750; cursor: pointer; }
+.edit-price-button:hover { text-decoration: underline; }
 @media (max-width: 760px) {
   .invoice-summary { grid-template-columns: 1fr; }
   .invoice-lines > div,.invoice-lines > button { grid-template-columns: 1fr auto; }
