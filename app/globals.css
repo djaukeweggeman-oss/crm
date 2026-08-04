@@ -851,6 +851,9 @@ td small {
   border: 1px solid var(--line);
   border-radius: 11px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .product-visual {
   height: 105px;
@@ -862,6 +865,9 @@ td small {
 }
 .product-info {
   padding: 15px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
 }
 .product-info > div:first-child {
   display: flex;
@@ -876,6 +882,12 @@ td small {
 .product-info h3 {
   font-size: 15px;
   margin: 10px 0 2px;
+  min-height: 42px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .product-info > small {
   font-size: 9px;

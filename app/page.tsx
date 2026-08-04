@@ -627,6 +627,11 @@ function Dashboard(p: any) {
     (c: Customer) => c.nextFollow && c.nextFollow <= today,
   );
   const lowStock = p.products.filter((x: Product) => x.stock < x.min);
+  const totalStock = p.products.reduce(
+    (total: number, product: Product) =>
+      total + (product.stock === 999 ? 0 : Math.max(0, product.stock)),
+    0,
+  );
   return (
     <>
       <PageHead
@@ -713,9 +718,9 @@ function Dashboard(p: any) {
         />
         <Kpi
           icon="□"
-          label="Lage voorraad"
-          value={`${lowStock.length} product${lowStock.length !== 1 ? "en" : ""}`}
-          sub={lowStock.length ? "actie nodig" : "voorraad op peil"}
+          label="Totale voorraad"
+          value={`${totalStock} ${totalStock === 1 ? "stuk" : "stuks"}`}
+          sub={lowStock.length ? `${lowStock.length} product${lowStock.length !== 1 ? "en" : ""} onder minimum` : "voorraad op peil"}
           warn={lowStock.length > 0}
           onClick={() => p.go("producten")}
         />
