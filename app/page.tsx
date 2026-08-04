@@ -38,6 +38,8 @@ type Product = {
   category: string;
   cost: number;
   price: number;
+  priceIncludesVat?: boolean;
+  vatRate?: number;
   stock: number;
   min: number;
   active: boolean;
@@ -78,6 +80,9 @@ type Invoice = {
   paid: number;
   status: string;
   customerEmail?: string;
+  subtotal?: number;
+  vatAmount?: number;
+  vatRate?: number;
   lines?: Array<{ productId: number; description: string; quantity: number; unitPrice: number; total: number }>;
 };
 type PurchaseInvoice = {
@@ -231,8 +236,8 @@ function AuthScreen() {
   return (
     <div className="auth-page">
       <div className="auth-panel">
-        <div className="logo">N</div>
-        <span className="eyebrow">NFC ADMINISTRATIE</span>
+        <div className="logo">W</div>
+        <span className="eyebrow">WGMN DIGITAL</span>
         <h1>{mode === "login" ? "Welkom terug, Auke" : "Maak je beveiligde account"}</h1>
         <form onSubmit={submit}>
           <label>E-mailadres<input name="email" type="email" required autoComplete="email" /></label>
@@ -519,10 +524,10 @@ export default function Home() {
     <div className="app">
       <aside className={menu ? "open" : ""}>
         <div className="brand">
-          <div className="logo">N</div>
+          <div className="logo">W</div>
           <div>
-            <b>NFC Administratie</b>
-            <small>Jouw bedrijf, helder geregeld</small>
+            <b>WGMN Digital</b>
+            <small>Digitale oplossingen, helder geregeld</small>
           </div>
         </div>
         <nav>
@@ -1166,7 +1171,7 @@ function Products(p: any) {
               <small>{x.sku}</small>
               <div className="price">
                 <b>{euro(x.price)}</b>
-                <span>Verkoopprijs</span>
+                <span>Verkoopprijs {x.priceIncludesVat === false ? "excl. btw" : "incl. btw"}</span>
               </div>
               <div className="unit-cost">
                 <small>KOSTPRIJS PER STUK</small>
@@ -1207,7 +1212,7 @@ function Products(p: any) {
                   − Afboeken
                 </button>
               </div>
-              <button className="edit-price-button" onClick={() => p.setModal(`product-price:${x.id}`)}>Verkoopprijs wijzigen</button>
+              <button className="edit-price-button" onClick={() => p.setModal(`product-price:${x.id}`)}>Product en prijs bewerken</button>
             </div>
           </div>
         ))}
@@ -1323,7 +1328,7 @@ function Invoices(p: any) {
             <button onClick={async () => {
               if (!i.lines?.length) return p.notify("Deze oudere factuur bevat nog geen productregels voor een PDF");
               const customer = p.customers.find((item: Customer) => item.company === i.customer);
-              const blob = await createInvoicePdf({ number: i.number, date: i.date, due: i.due, customer: { company: i.customer, contact: customer?.contact, email: i.customerEmail || customer?.email, city: customer?.city }, lines: i.lines, total: i.total });
+              const blob = await createInvoicePdf({ number: i.number, date: i.date, due: i.due, customer: { company: i.customer, contact: customer?.contact, email: i.customerEmail || customer?.email, city: customer?.city }, lines: i.lines, total: i.total, subtotal: i.subtotal, vatAmount: i.vatAmount, vatRate: i.vatRate || 21 });
               downloadInvoicePdf(blob, i.number);
               p.notify(`${i.number}.pdf gedownload`);
             }}>
@@ -1793,14 +1798,20 @@ function Modal(p: any) {
         p.notify("Onvoldoende voorraad voor deze verkoop");
         return;
       }
-      const total = Math.round(product.price * quantity * 100) / 100;
+      const vatRate = product.vatRate ?? 21;
+      const unitPriceInclVat = product.priceIncludesVat === false
+        ? Math.round(product.price * (1 + vatRate / 100) * 100) / 100
+        : product.price;
+      const total = Math.round(unitPriceInclVat * quantity * 100) / 100;
+      const subtotal = Math.round((total / (1 + vatRate / 100)) * 100) / 100;
+      const vatAmount = Math.round((total - subtotal) * 100) / 100;
       const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(p.invoices.length + 1).padStart(4, "0")}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14);
       const invoice: Invoice = {
         id: Date.now(), number: invoiceNumber, customer: customer.company, customerEmail: customer.email,
-        date: today, due: dueDate.toISOString().slice(0, 10), total, paid: 0, status: "Verzonden",
-        lines: [{ productId: product.id, description: product.name, quantity, unitPrice: product.price, total }],
+        date: today, due: dueDate.toISOString().slice(0, 10), total, subtotal, vatAmount, vatRate, paid: 0, status: "Verzonden",
+        lines: [{ productId: product.id, description: product.name, quantity, unitPrice: unitPriceInclVat, total }],
       };
       p.setInvoices((current: Invoice[]) => [invoice, ...current]);
       p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? {
@@ -1812,12 +1823,12 @@ function Modal(p: any) {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
         return existingCustomer ? updated : [{ ...customer, revenue: total, purchases: 1, lastOrder: today }, ...updated];
       });
-      const pdf = await createInvoicePdf({ number: invoice.number, date: invoice.date, due: invoice.due, customer: { company: customer.company, contact: customer.contact, email: customer.email, city: customer.city }, lines: invoice.lines || [], total: invoice.total });
+      const pdf = await createInvoicePdf({ number: invoice.number, date: invoice.date, due: invoice.due, customer: { company: customer.company, contact: customer.contact, email: customer.email, city: customer.city }, lines: invoice.lines || [], total: invoice.total, subtotal, vatAmount, vatRate });
       downloadInvoicePdf(pdf, invoice.number);
       p.notify(`${invoiceNumber}.pdf aangemaakt en voorraad bijgewerkt`);
       if (customer.email) {
         const subject = encodeURIComponent(`Factuur ${invoiceNumber}`);
-        const body = encodeURIComponent(`Beste ${customer.contact || customer.company},\n\nIn de bijlage vind je factuur ${invoiceNumber}. Het PDF-bestand is zojuist gedownload en kan aan deze e-mail worden toegevoegd.\n\nMet vriendelijke groet,\nAuke`);
+        const body = encodeURIComponent(`Beste ${customer.contact || customer.company},\n\nIn de bijlage vind je factuur ${invoiceNumber}. Het PDF-bestand is zojuist gedownload en kan aan deze e-mail worden toegevoegd.\n\nMet vriendelijke groet,\nWGMN Digital`);
         setTimeout(() => { window.location.href = `mailto:${encodeURIComponent(customer.email)}?subject=${subject}&body=${body}`; }, 100);
       }
     }
@@ -1855,6 +1866,8 @@ function Modal(p: any) {
           category: String(f.get("category")),
           cost,
           price: Number(f.get("price")),
+          priceIncludesVat: f.get("priceIncludesVat") === "on",
+          vatRate: 21,
           stock: qty,
           min: Number(f.get("min")),
           active: true,
@@ -1912,8 +1925,10 @@ function Modal(p: any) {
     }
     if (type === "product-price") {
       const price = Math.max(0, Number(f.get("price")));
-      p.setProducts((current: Product[]) => current.map((product) => product.id === recordId ? { ...product, price } : product));
-      p.notify(`Verkoopprijs gewijzigd naar ${euro(price)}`);
+      const name = String(f.get("name")).trim();
+      const priceIncludesVat = f.get("priceIncludesVat") === "on";
+      p.setProducts((current: Product[]) => current.map((product) => product.id === recordId ? { ...product, name, price, priceIncludesVat, vatRate: 21 } : product));
+      p.notify(`${name} bijgewerkt — ${euro(price)} ${priceIncludesVat ? "incl." : "excl."} btw`);
     }
     if (type === "cost") {
       p.setCosts((a: Cost[]) => [
@@ -2138,7 +2153,7 @@ function Modal(p: any) {
     contact: "Contactmoment toevoegen",
     "stock-order": "Inkoop registreren",
     "stock-writeoff": "Voorraad afboeken",
-    "product-price": "Verkoopprijs wijzigen",
+    "product-price": "Product en prijs bewerken",
   };
   return (
     <div
@@ -2209,7 +2224,7 @@ function Modal(p: any) {
             <div className="form-grid">
               <label>Product *<select value={saleProductId} onChange={(event) => setSaleProductId(Number(event.target.value))} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
               <label>Aantal *<input name="quantity" type="number" min="1" defaultValue="1" required /></label>
-              <label>Prijs per stuk<input value={p.products.find((product: Product) => product.id === saleProductId)?.price || 0} readOnly /></label>
+              <label>Prijs per stuk incl. btw<input value={(() => { const product = p.products.find((item: Product) => item.id === saleProductId); if (!product) return 0; return product.priceIncludesVat === false ? (product.price * (1 + (product.vatRate ?? 21) / 100)).toFixed(2) : product.price; })()} readOnly /></label>
             </div>
             <div className="privacy-note">Na opslaan wordt de factuur aangemaakt, de voorraad afgeboekt en een verzendklare e-mail geopend.</div>
           </>
@@ -2256,6 +2271,11 @@ function Modal(p: any) {
                   required
                   placeholder="0,00"
                 />
+              </label>
+              <label className="toggle-label">
+                Prijs is incl. btw
+                <input name="priceIncludesVat" type="checkbox" defaultChecked />
+                <span className="toggle" />
               </label>
               <label>
                 Minimale voorraad
@@ -2329,7 +2349,10 @@ function Modal(p: any) {
         )}
         {type === "product-price" && (
           <div className="form-grid">
-            <label className="full">Nieuwe verkoopprijs per stuk *<input name="price" type="number" min="0" step=".01" defaultValue={p.products.find((product: Product) => product.id === recordId)?.price || 0} required autoFocus /></label>
+            <label className="full">Productnaam *<input name="name" defaultValue={p.products.find((product: Product) => product.id === recordId)?.name || ""} required autoFocus /></label>
+            <label>Verkoopprijs per stuk *<input name="price" type="number" min="0" step=".01" defaultValue={p.products.find((product: Product) => product.id === recordId)?.price || 0} required /></label>
+            <label className="toggle-label">Prijs is incl. btw<input name="priceIncludesVat" type="checkbox" defaultChecked={p.products.find((product: Product) => product.id === recordId)?.priceIncludesVat !== false} /><span className="toggle" /></label>
+            <div className="privacy-note full">Op verkoopfacturen wordt altijd 21% btw apart vermeld.</div>
           </div>
         )}
         {type === "cost" && (

@@ -7,6 +7,9 @@ export type InvoicePdfData = {
   customer: { company: string; contact?: string; email?: string; city?: string };
   lines: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
   total: number;
+  subtotal?: number;
+  vatAmount?: number;
+  vatRate?: number;
 };
 
 const money = (amount: number) => `EUR ${amount.toFixed(2).replace(".", ",")}`;
@@ -30,17 +33,22 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   const page = pdf.addPage([595.28, 841.89]);
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const green = rgb(0.04, 0.38, 0.32);
+  const green = rgb(0.04, 0.20, 0.29);
+  const accent = rgb(0.05, 0.58, 0.67);
   const ink = rgb(0.08, 0.13, 0.11);
   const muted = rgb(0.39, 0.46, 0.43);
   const line = rgb(0.84, 0.88, 0.86);
-  const pale = rgb(0.94, 0.97, 0.96);
+  const pale = rgb(0.93, 0.97, 0.98);
   const left = 52;
   const right = 543;
+  const drawAmountRight = (value: string, y: number, size: number, font: typeof regular, color = ink) => {
+    page.drawText(value, { x: right - font.widthOfTextAtSize(value, size), y, size, font, color });
+  };
 
   page.drawRectangle({ x: 0, y: 780, width: 595.28, height: 62, color: green });
-  page.drawText("N", { x: left, y: 800, size: 24, font: bold, color: rgb(1, 1, 1) });
-  page.drawText("NFC ADMINISTRATIE", { x: 88, y: 807, size: 13, font: bold, color: rgb(1, 1, 1) });
+  page.drawRectangle({ x: left, y: 795, width: 32, height: 32, color: accent });
+  page.drawText("W", { x: left + 6, y: 803, size: 18, font: bold, color: rgb(1, 1, 1) });
+  page.drawText("WGMN DIGITAL", { x: 94, y: 807, size: 13, font: bold, color: rgb(1, 1, 1) });
   page.drawText("Factuur", { x: 448, y: 802, size: 24, font: bold, color: rgb(1, 1, 1) });
 
   page.drawText("FACTUUR AAN", { x: left, y: 735, size: 8, font: bold, color: green });
@@ -62,7 +70,7 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   page.drawRectangle({ x: left, y: tableTop, width: right - left, height: 28, color: pale });
   page.drawText("OMSCHRIJVING", { x: left + 10, y: tableTop + 10, size: 8, font: bold, color: green });
   page.drawText("AANTAL", { x: 377, y: tableTop + 10, size: 8, font: bold, color: green });
-  page.drawText("PRIJS", { x: 432, y: tableTop + 10, size: 8, font: bold, color: green });
+  page.drawText("PRIJS INCL.", { x: 422, y: tableTop + 10, size: 8, font: bold, color: green });
   page.drawText("TOTAAL", { x: 500, y: tableTop + 10, size: 8, font: bold, color: green });
 
   let rowY = tableTop - 24;
@@ -71,22 +79,29 @@ export async function createInvoicePdf(data: InvoicePdfData) {
     descriptionLines.forEach((text, index) => page.drawText(text, { x: left + 10, y: rowY - index * 12, size: 9, font: index === 0 ? bold : regular, color: ink }));
     page.drawText(String(item.quantity), { x: 388, y: rowY, size: 9, font: regular, color: ink });
     page.drawText(money(item.unitPrice), { x: 425, y: rowY, size: 9, font: regular, color: ink });
-    page.drawText(money(item.total), { x: 493, y: rowY, size: 9, font: bold, color: ink });
+    drawAmountRight(money(item.total), rowY, 9, bold);
     rowY -= Math.max(42, descriptionLines.length * 14 + 14);
     page.drawLine({ start: { x: left, y: rowY + 12 }, end: { x: right, y: rowY + 12 }, thickness: 0.7, color: line });
   }
 
+  const vatRate = data.vatRate ?? 21;
+  const subtotal = data.subtotal ?? Math.round((data.total / (1 + vatRate / 100)) * 100) / 100;
+  const vatAmount = data.vatAmount ?? Math.round((data.total - subtotal) * 100) / 100;
   const totalY = Math.max(250, rowY - 20);
-  page.drawText("TOTAAL", { x: 397, y: totalY, size: 10, font: bold, color: ink });
-  page.drawText(money(data.total), { x: 485, y: totalY, size: 12, font: bold, color: green });
-  page.drawLine({ start: { x: 390, y: totalY - 8 }, end: { x: right, y: totalY - 8 }, thickness: 1.4, color: green });
+  page.drawText("Subtotaal excl. btw", { x: 390, y: totalY + 34, size: 9, font: regular, color: muted });
+  drawAmountRight(money(subtotal), totalY + 34, 9, regular);
+  page.drawText(`Btw ${vatRate}%`, { x: 390, y: totalY + 15, size: 9, font: regular, color: muted });
+  drawAmountRight(money(vatAmount), totalY + 15, 9, regular);
+  page.drawText("Totaal incl. btw", { x: 390, y: totalY - 8, size: 10, font: bold, color: ink });
+  drawAmountRight(money(data.total), totalY - 8, 12, bold, accent);
+  page.drawLine({ start: { x: 390, y: totalY - 17 }, end: { x: right, y: totalY - 17 }, thickness: 1.4, color: accent });
 
   page.drawRectangle({ x: left, y: 105, width: right - left, height: 82, color: pale });
   page.drawText("BETAALINFORMATIE", { x: left + 14, y: 165, size: 8, font: bold, color: green });
   page.drawText(`Betaal uiterlijk op ${data.due} onder vermelding van ${data.number}.`, { x: left + 14, y: 145, size: 9, font: regular, color: ink });
   page.drawText("Bedankt voor je aankoop.", { x: left + 14, y: 126, size: 9, font: regular, color: muted });
-  page.drawText("NFC Administratie", { x: left, y: 55, size: 9, font: bold, color: green });
-  page.drawText("Dit document is automatisch en uniform gegenereerd.", { x: 350, y: 55, size: 7, font: regular, color: muted });
+  page.drawText("WGMN Digital", { x: left, y: 55, size: 9, font: bold, color: green });
+  page.drawText("Digitale oplossingen, professioneel geleverd.", { x: 365, y: 55, size: 7, font: regular, color: muted });
 
   const bytes = await pdf.save();
   return new Blob([bytes as BlobPart], { type: "application/pdf" });
