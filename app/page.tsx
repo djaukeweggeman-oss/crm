@@ -104,6 +104,7 @@ type Cost = {
   status: string;
   originalAmount?: number;
   exchangeRate?: number;
+  sourceInvoiceId?: number;
 };
 
 const euro = (n: number) =>
@@ -346,12 +347,33 @@ export default function Home() {
         return;
       }
       if (data) {
+        const loadedPurchaseInvoices: PurchaseInvoice[] = data.purchase_invoices || [];
+        const loadedCosts: Cost[] = data.costs || [];
+        const restoredInvoiceCosts: Cost[] = loadedPurchaseInvoices
+          .filter(
+            (invoice) =>
+              (invoice.currency || "EUR").toUpperCase() === "EUR" &&
+              !loadedCosts.some((cost) => cost.sourceInvoiceId === invoice.id),
+          )
+          .map((invoice) => ({
+            id: invoice.id,
+            supplier: invoice.supplier || "Onbekende leverancier",
+            date: invoice.date || today,
+            category: "Inkoop",
+            description: `Inkoopfactuur ${invoice.number || invoice.fileName}`,
+            amount: invoice.total,
+            currency: "EUR",
+            originalAmount: invoice.total,
+            exchangeRate: 1,
+            status: "Betaald",
+            sourceInvoiceId: invoice.id,
+          }));
         setCustomers(data.customers || []);
         setProducts(data.products || []);
         setInvoices(data.invoices || []);
-        setPurchaseInvoices(data.purchase_invoices || []);
+        setPurchaseInvoices(loadedPurchaseInvoices);
         setQuotes(data.quotes || []);
-        setCosts(data.costs || []);
+        setCosts([...restoredInvoiceCosts, ...loadedCosts]);
       } else {
         const cleaned = {
           customers: [],
@@ -604,6 +626,19 @@ function PageHead({
 }
 
 function Dashboard(p: any) {
+  const amsterdamHour = Number(
+    new Intl.DateTimeFormat("nl-NL", {
+      hour: "2-digit",
+      hour12: false,
+      timeZone: "Europe/Amsterdam",
+    }).format(new Date()),
+  );
+  const greeting =
+    amsterdamHour < 12
+      ? "Goedemorgen"
+      : amsterdamHour < 18
+        ? "Goedemiddag"
+        : "Goedenavond";
   const overdue = p.invoices
     .filter((i: Invoice) => i.status === "Te laat")
     .reduce((a: number, i: Invoice) => a + i.total - i.paid, 0);
@@ -615,7 +650,7 @@ function Dashboard(p: any) {
     <>
       <PageHead
         eyebrow="VANDAAG"
-        title="Goedemorgen, Auke"
+        title={`${greeting}, Auke`}
         desc="Dit is wat er vandaag speelt in je bedrijf."
         action="Nieuwe verkoop"
         onAction={() => p.go("facturen")}
@@ -1073,14 +1108,6 @@ function Products(p: any) {
         <button className="secondary" onClick={() => p.setModal("invoice-import")}>
           ⇧ Inkoopfactuur uploaden
         </button>
-      </div>
-      <div className="how-it-works">
-        <b>Zo werkt het</b>
-        <span>1. Voeg een product toe</span>
-        <i>→</i>
-        <span>2. Vul aantal en totaalbedrag in</span>
-        <i>→</i>
-        <span>3. De kostprijs per stuk wordt berekend</span>
       </div>
       <div className="inventory">
         <div>
@@ -2361,6 +2388,7 @@ function InvoiceImportModal(p: any) {
   const [error, setError] = useState("");
   const [parsed, setParsed] = useState<ParsedInvoice | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [invoiceExchangeRate, setInvoiceExchangeRate] = useState(1);
 
   const analyse = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2418,6 +2446,9 @@ function InvoiceImportModal(p: any) {
       return;
     }
     const now = Date.now();
+    const invoiceTotal = parsed.items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const invoiceCurrency = (parsed.currency || "EUR").toUpperCase();
+    const euroTotal = Math.round(invoiceTotal * invoiceExchangeRate * 100) / 100;
     p.setProducts((current: Product[]) => {
       const next = [...current];
       parsed.items.forEach((item, index) => {
@@ -2467,19 +2498,35 @@ function InvoiceImportModal(p: any) {
     });
     p.setPurchaseInvoices((current: PurchaseInvoice[]) => [
       {
-        id: Date.now(),
+        id: now,
         number: parsed.invoiceNumber,
         supplier: parsed.supplier,
         date: parsed.invoiceDate,
-        total: parsed.items.reduce((sum, item) => sum + item.lineTotal, 0),
-        currency: parsed.currency || "EUR",
+        total: invoiceTotal,
+        currency: invoiceCurrency,
         fileName: selectedFile.name,
         filePath,
         itemCount: parsed.items.length,
       },
       ...current,
     ]);
-    p.notify(`${parsed.items.length} factuurregels als voorraad verwerkt`);
+    p.setCosts((current: Cost[]) => [
+      {
+        id: now,
+        supplier: parsed.supplier || "Onbekende leverancier",
+        date: parsed.invoiceDate || today,
+        category: "Inkoop",
+        description: `Inkoopfactuur ${parsed.invoiceNumber || selectedFile.name}`,
+        amount: euroTotal,
+        currency: invoiceCurrency,
+        originalAmount: invoiceTotal,
+        exchangeRate: invoiceExchangeRate,
+        status: "Betaald",
+        sourceInvoiceId: now,
+      },
+      ...current,
+    ]);
+    p.notify(`${parsed.items.length} voorraadregels verwerkt en ${euro(euroTotal)} als kosten geboekt`);
     p.close();
   };
 
@@ -2520,6 +2567,18 @@ function InvoiceImportModal(p: any) {
                 </div>
               ))}
             </div>
+            {(parsed.currency || "EUR").toUpperCase() !== "EUR" && (
+              <label className="full">
+                Wisselkoers naar euro (1 {parsed.currency.toUpperCase()} = hoeveel EUR?)
+                <input
+                  type="number"
+                  min="0.000001"
+                  step="0.000001"
+                  value={invoiceExchangeRate}
+                  onChange={(event) => setInvoiceExchangeRate(Math.max(0.000001, Number(event.target.value) || 1))}
+                />
+              </label>
+            )}
             <div className="privacy-note">Controleer aantallen en bedragen. Automatische herkenning kan fouten maken.</div>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setParsed(null)}>Andere factuur</button>
