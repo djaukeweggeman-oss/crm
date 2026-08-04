@@ -514,7 +514,7 @@ export default function Home() {
       {menu && <div className="scrim" onClick={() => setMenu(false)} />}
       <main>
         <header>
-          <button className="mobile-menu" onClick={() => setMenu(true)}>
+          <button className="mobile-menu" aria-label="Menu openen" onClick={() => setMenu(true)}>
             ☰
           </button>
           <div className="search">
@@ -527,8 +527,8 @@ export default function Home() {
             />
             <kbd>⌘ K</kbd>
           </div>
-          <button className="notify">♢</button>
-          <button className="quick" onClick={() => setModal("quick")}>
+          <button className="notify" aria-label="Meldingen">♢</button>
+          <button className="quick" aria-label="Snelle invoer" onClick={() => setModal("quick")}>
             ＋ <span>Snelle invoer</span>
           </button>
         </header>
