@@ -988,6 +988,7 @@ td small {
 .row-actions {
   display: flex;
   gap: 5px;
+  flex-wrap: wrap;
 }
 .row-actions button,
 .table-btn {
@@ -997,6 +998,21 @@ td small {
   font-size: 9px;
   border-radius: 5px;
   padding: 6px 8px;
+}
+.row-actions .delete-invoice {
+  border-color: #d68b8b;
+  background: #fff5f5;
+  color: #a32626;
+  font-weight: 700;
+}
+.row-actions .delete-invoice:hover:not(:disabled) {
+  background: #a32626;
+  border-color: #a32626;
+  color: white;
+}
+.row-actions .delete-invoice:disabled {
+  cursor: wait;
+  opacity: .6;
 }
 .hero-metric {
   padding: 21px;
@@ -1207,6 +1223,9 @@ td small {
   z-index: 100;
   box-shadow: 0 8px 25px #0003;
   animation: slide 0.25s;
+}
+.toast.error {
+  background: #8f2424;
 }
 @keyframes slide {
   from {

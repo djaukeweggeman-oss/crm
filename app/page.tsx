@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase, supabaseConfigured } from "./supabase";
 import { createInvoicePdf, downloadInvoicePdf } from "./invoice-pdf";
+import { formatDateNL, isValidDateValue, prepareInvoiceDeletion } from "./crm-state";
 
 type View =
   | "dashboard"
@@ -121,14 +122,10 @@ type Cost = {
 
 const euro = (n: number) =>
   new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(
-    n,
+    Number.isFinite(n) ? n : 0,
   );
-const dateNL = (s: string) =>
-  new Intl.DateTimeFormat("nl-NL", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(s));
+const dateNL = formatDateNL;
+const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value : [];
 const today = new Date().toISOString().slice(0, 10);
 
 const seedCustomers: Customer[] = [];
@@ -314,8 +311,8 @@ export default function Home() {
         return;
       }
       if (data) {
-        const loadedPurchaseInvoices: PurchaseInvoice[] = data.purchase_invoices || [];
-        const loadedProducts: Product[] = data.products || [];
+        const loadedPurchaseInvoices = asArray<PurchaseInvoice>(data.purchase_invoices);
+        const loadedProducts = asArray<Product>(data.products);
         const repairedProducts = loadedProducts.map((product) => {
           if (!product.stockInitialized && (product.lastPurchaseQty || 0) > 0) {
             return {
@@ -330,7 +327,7 @@ export default function Home() {
           const calculatedStock = Math.max(0, incoming - outgoing);
           return calculatedStock > 0 ? { ...product, stock: calculatedStock } : product;
         });
-        const loadedCosts: Cost[] = data.costs || [];
+        const loadedCosts = asArray<Cost>(data.costs);
         const restoredInvoiceCosts: Cost[] = loadedPurchaseInvoices
           .filter(
             (invoice) =>
@@ -350,11 +347,11 @@ export default function Home() {
             status: "Betaald",
             sourceInvoiceId: invoice.id,
           }));
-        setCustomers(data.customers || []);
+        setCustomers(asArray<Customer>(data.customers));
         setProducts(repairedProducts);
-        setInvoices(data.invoices || []);
+        setInvoices(asArray<Invoice>(data.invoices));
         setPurchaseInvoices(loadedPurchaseInvoices);
-        setQuotes(data.quotes || []);
+        setQuotes(asArray<Quote>(data.quotes));
         setCosts([...restoredInvoiceCosts, ...loadedCosts]);
       } else {
         const cleaned = {
@@ -428,6 +425,33 @@ export default function Home() {
     setQuery("");
   };
   const notify = (s: string) => setToast(s);
+  const deleteInvoice = async (invoice: Invoice) => {
+    if (!userId) throw new Error("Je sessie is verlopen. Log opnieuw in.");
+
+    const { remainingInvoices, restoredProducts, restoredCustomers } =
+      prepareInvoiceDeletion(invoice, invoices, products, customers);
+
+    const { data, error } = await supabase
+      .from("crm_state")
+      .update({
+        invoices: remainingInvoices,
+        products: restoredProducts,
+        customers: restoredCustomers,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .select("invoices")
+      .single();
+
+    if (error) throw new Error(`Supabase kon de factuur niet verwijderen: ${error.message}`);
+    if (asArray<Invoice>(data?.invoices).some((item) => item.id === invoice.id)) {
+      throw new Error("Supabase heeft de factuur niet definitief verwijderd.");
+    }
+
+    setInvoices(remainingInvoices);
+    setProducts(restoredProducts);
+    setCustomers(restoredCustomers);
+  };
 
   if (!authReady) return <div className="auth-loading">Administratie laden…</div>;
   if (!userId) return <AuthScreen />;
@@ -461,7 +485,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify }} />
+      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify, deleteInvoice }} />
     ) : view === "inkoopfacturen" ? (
       <PurchaseInvoices {...{ purchaseInvoices, setPurchaseInvoices, products, setProducts, setCosts, query, setModal, notify }} />
     ) : view === "betalingen" ? (
@@ -561,7 +585,11 @@ export default function Home() {
           }}
         />
       )}
-      {toast && <div className="toast">✓ {toast}</div>}
+      {toast && (
+        <div className={`toast ${toast.startsWith("Fout:") ? "error" : ""}`} role="status">
+          {toast.startsWith("Fout:") ? "✕" : "✓"} {toast}
+        </div>
+      )}
       {needsPasskey && (
         <div className="passkey-setup-banner" role="dialog" aria-modal="true" aria-labelledby="passkey-title">
           <div>
@@ -972,7 +1000,14 @@ function Customers(p: any) {
   );
 }
 function Sales(p: any) {
-  const due = p.customers.filter((c: Customer) => c.nextFollow <= today);
+  const customers = asArray<Customer>(p.customers);
+  const quotes = asArray<Quote>(p.quotes);
+  const due = customers.filter(
+    (customer) => isValidDateValue(customer.nextFollow) && customer.nextFollow <= today,
+  );
+  const openQuotes = quotes.filter(
+    (quote) => !["Geaccepteerd", "Afgewezen", "Verlopen", "Omgezet naar factuur"].includes(quote.status),
+  );
   return (
     <>
       <PageHead
@@ -991,13 +1026,13 @@ function Sales(p: any) {
         <Kpi
           icon="◇"
           label="Open offertes"
-          value={`${p.quotes.filter((q:Quote)=>!["Geaccepteerd","Afgewezen","Verlopen","Omgezet naar factuur"].includes(q.status)).length} offertes`}
-          sub={euro(p.quotes.filter((q:Quote)=>!["Geaccepteerd","Afgewezen","Verlopen","Omgezet naar factuur"].includes(q.status)).reduce((a:number,q:Quote)=>a+q.total,0))}
+          value={`${openQuotes.length} offertes`}
+          sub={euro(openQuotes.reduce((sum, quote) => sum + (Number(quote.total) || 0), 0))}
         />
         <Kpi
           icon="↻"
           label="Herhaalkansen"
-          value={`${p.customers.filter((c:Customer)=>c.purchases>0).length} klanten`}
+          value={`${customers.filter((customer) => (Number(customer.purchases) || 0) > 0).length} klanten`}
           sub="60+ dagen geleden"
         />
       </div>
@@ -1006,14 +1041,14 @@ function Sales(p: any) {
           ["Vandaag", due, "red"],
           [
             "Deze week",
-            p.customers
-              .filter((c: Customer) => c.nextFollow > today)
+            customers
+              .filter((customer) => isValidDateValue(customer.nextFollow) && customer.nextFollow > today)
               .slice(0, 3),
             "amber",
           ],
           [
             "Herhaalaankoop",
-            p.customers.filter((c: Customer) => c.purchases > 0),
+            customers.filter((customer) => (Number(customer.purchases) || 0) > 0),
             "green",
           ],
         ].map((col: any) => (
@@ -1179,7 +1214,7 @@ function Products(p: any) {
 function Quotes(p: any) {
   const rows = p.quotes.filter((q: Quote) =>
     [q.number, q.customer, q.status].some((s) =>
-      s.toLowerCase().includes(p.query.toLowerCase()),
+      String(s || "").toLowerCase().includes(p.query.toLowerCase()),
     ),
   );
   return (
@@ -1245,6 +1280,7 @@ function Quotes(p: any) {
   );
 }
 function Invoices(p: any) {
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const rows = p.invoices.filter((q: Invoice) =>
     [q.number, q.customer, q.status].some((s) =>
       s.toLowerCase().includes(p.query.toLowerCase()),
@@ -1301,6 +1337,25 @@ function Invoices(p: any) {
               }
             >
               E-mail
+            </button>
+            <button
+              className="delete-invoice"
+              disabled={deletingId === i.id}
+              onClick={async () => {
+                if (!window.confirm(`Verkoopfactuur ${i.number} permanent verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+                setDeletingId(i.id);
+                try {
+                  await p.deleteInvoice(i);
+                  p.notify(`Verkoopfactuur ${i.number} is permanent verwijderd uit Supabase`);
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : "Onbekende fout";
+                  p.notify(`Fout: ${message}`);
+                } finally {
+                  setDeletingId(null);
+                }
+              }}
+            >
+              {deletingId === i.id ? "Verwijderen…" : "Verwijderen"}
             </button>
           </>
         )}
@@ -1773,7 +1828,7 @@ function Modal(p: any) {
       p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? {
         ...item,
         stock: item.stock - quantity,
-        stockHistory: [...(item.stockHistory || []), { id: Date.now(), date: today, type: "afboeking", quantity, reason: `Verkoop ${invoiceNumber}` }],
+        stockHistory: [...(item.stockHistory || []), { id: Date.now(), date: today, type: "afboeking", quantity, reason: `Verkoop ${invoiceNumber}`, sourceInvoiceId: invoice.id }],
       } : item));
       p.setCustomers((current: Customer[]) => {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
