@@ -1720,6 +1720,14 @@ function Modal(p: any) {
   const [costRate, setCostRate] = useState(1);
   const [saleCustomerId, setSaleCustomerId] = useState(String(p.selected?.id || "new"));
   const [saleProductId, setSaleProductId] = useState(Number(p.products?.[0]?.id || 0));
+  const [saleQuantity, setSaleQuantity] = useState(1);
+  const [saleTotal, setSaleTotal] = useState(() => {
+    const product = p.products?.[0] as Product | undefined;
+    if (!product) return 0;
+    return product.priceIncludesVat === false
+      ? Math.round(product.price * (1 + (product.vatRate ?? 21) / 100) * 100) / 100
+      : product.price;
+  });
   const type = p.type.split(":")[0];
   const recordId = Number(p.type.split(":")[1]);
   const close = p.close;
@@ -1755,19 +1763,18 @@ function Modal(p: any) {
         return;
       }
       const vatRate = product.vatRate ?? 21;
-      const unitPriceInclVat = product.priceIncludesVat === false
-        ? Math.round(product.price * (1 + vatRate / 100) * 100) / 100
-        : product.price;
-      const total = Math.round(unitPriceInclVat * quantity * 100) / 100;
+      const total = Math.round(Math.max(0, Number(f.get("saleTotal"))) * 100) / 100;
+      const unitPriceInclVat = Math.round((total / quantity) * 100) / 100;
       const subtotal = Math.round((total / (1 + vatRate / 100)) * 100) / 100;
       const vatAmount = Math.round((total - subtotal) * 100) / 100;
+      const colorNote = String(f.get("colors") || "").trim();
       const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(p.invoices.length + 1).padStart(4, "0")}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14);
       const invoice: Invoice = {
         id: Date.now(), number: invoiceNumber, customer: customer.company, customerEmail: customer.email,
         date: today, due: dueDate.toISOString().slice(0, 10), total, subtotal, vatAmount, vatRate, paid: 0, status: "Verzonden",
-        lines: [{ productId: product.id, description: product.name, quantity, unitPrice: unitPriceInclVat, total }],
+        lines: [{ productId: product.id, description: colorNote ? `${product.name} — ${colorNote}` : product.name, quantity, unitPrice: unitPriceInclVat, total }],
       };
       p.setInvoices((current: Invoice[]) => [invoice, ...current]);
       p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? {
@@ -2176,12 +2183,14 @@ function Modal(p: any) {
               <label className="full">Klant<select value={saleCustomerId} onChange={(event) => setSaleCustomerId(event.target.value)}><option value="new">＋ Nieuwe klant</option>{p.customers.map((customer: Customer) => <option key={customer.id} value={customer.id}>{customer.company}</option>)}</select></label>
               {saleCustomerId === "new" && <><label>Bedrijfsnaam of naam *<input name="company" required autoFocus /></label><label>Contactpersoon<input name="contact" /></label><label>E-mailadres *<input name="email" type="email" required /></label><label>Telefoonnummer<input name="phone" /></label><label>Plaats<input name="city" /></label></>}
             </div>
-            <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Kies het product en aantal.</small></div></div>
+            <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Kies het product en vul zelf de afgesproken totaalprijs in.</small></div></div>
             <div className="form-grid">
-              <label>Product *<select value={saleProductId} onChange={(event) => setSaleProductId(Number(event.target.value))} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
-              <label>Aantal *<input name="quantity" type="number" min="1" defaultValue="1" required /></label>
-              <label>Prijs per stuk incl. btw<input value={(() => { const product = p.products.find((item: Product) => item.id === saleProductId); if (!product) return 0; return product.priceIncludesVat === false ? (product.price * (1 + (product.vatRate ?? 21) / 100)).toFixed(2) : product.price; })()} readOnly /></label>
+              <label>Product *<select value={saleProductId} onChange={(event) => { const nextId = Number(event.target.value); const product = p.products.find((item: Product) => item.id === nextId); setSaleProductId(nextId); if (product) { const unitPrice = product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price; setSaleTotal(Math.round(unitPrice * saleQuantity * 100) / 100); } }} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
+              <label>Aantal *<input name="quantity" type="number" min="1" value={saleQuantity} onChange={(event) => { const quantity = Math.max(1, Math.floor(Number(event.target.value))); const product = p.products.find((item: Product) => item.id === saleProductId); setSaleQuantity(quantity); if (product) { const unitPrice = product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price; setSaleTotal(Math.round(unitPrice * quantity * 100) / 100); } }} required /></label>
+              <label>Handmatige totaalprijs incl. btw *<input name="saleTotal" type="number" min="0" step=".01" value={saleTotal} onChange={(event) => setSaleTotal(Number(event.target.value))} required /><small className="field-help">Voor alle stuks samen, ongeacht de kleur.</small></label>
+              <label>Kleuren / verdeling<input name="colors" placeholder="Bijv. 2 zwart, 1 wit (optioneel)" /></label>
             </div>
+            <div className="calc-preview"><span>Handmatig totaal</span><b>{euro(saleTotal)}</b><span>Gemiddeld per stuk</span><b>{euro(saleQuantity > 0 ? saleTotal / saleQuantity : 0)}</b></div>
             <div className="privacy-note">Na opslaan wordt de factuur aangemaakt, de voorraad afgeboekt en een verzendklare e-mail geopend.</div>
           </>
         )}
