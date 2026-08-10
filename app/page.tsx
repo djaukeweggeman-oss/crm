@@ -234,6 +234,7 @@ export default function Home() {
   const [purchaseInvoices, setPurchaseInvoices] = useState<PurchaseInvoice[]>([]);
   const [quotes, setQuotes] = useState(seedQuotes);
   const [costs, setCosts] = useState(seedCosts);
+  const [incomeTaxRate, setIncomeTaxRate] = useState(30);
   const [period, setPeriod] = useState("Maand");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -262,6 +263,17 @@ export default function Home() {
     });
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const savedRate = Number(localStorage.getItem("nfc-income-tax-rate"));
+    if (Number.isFinite(savedRate) && savedRate >= 0 && savedRate <= 100) setIncomeTaxRate(savedRate);
+  }, []);
+
+  const updateIncomeTaxRate = (rate: number) => {
+    const safeRate = Math.min(100, Math.max(0, rate));
+    setIncomeTaxRate(safeRate);
+    localStorage.setItem("nfc-income-tax-rate", String(safeRate));
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -428,6 +440,10 @@ export default function Home() {
   );
   const paid = invoices.reduce((a, i) => a + i.paid, 0);
   const costTotal = costs.reduce((a, c) => a + c.amount, 0);
+  const vatDue = invoices.reduce((sum, invoice) => sum + (invoice.vatAmount ?? invoice.total * 21 / 121), 0);
+  const grossProfit = totalRevenue - vatDue - costTotal;
+  const incomeTax = Math.max(0, grossProfit) * incomeTaxRate / 100;
+  const netProfit = grossProfit - incomeTax;
   const filter = (s: string) => s.toLowerCase().includes(query.toLowerCase());
   const go = (v: View) => {
     setView(v);
@@ -455,6 +471,11 @@ export default function Home() {
           period,
           setPeriod,
           setModal,
+          vatDue,
+          grossProfit,
+          incomeTax,
+          netProfit,
+          incomeTaxRate,
         }}
       />
     ) : view === "klanten" ? (
@@ -476,9 +497,9 @@ export default function Home() {
     ) : view === "kosten" ? (
       <Costs {...{ costs, setCosts, query, setModal }} />
     ) : view === "rapportages" ? (
-      <Reports {...{ totalRevenue, costTotal, outstanding, paid, products, invoices }} />
+      <Reports {...{ totalRevenue, costTotal, outstanding, paid, products, invoices, vatDue, grossProfit, incomeTax, netProfit, incomeTaxRate }} />
     ) : (
-      <Settings notify={notify} />
+      <Settings notify={notify} incomeTaxRate={incomeTaxRate} setIncomeTaxRate={updateIncomeTaxRate} />
     );
 
   return (
@@ -718,9 +739,23 @@ function Dashboard(p: any) {
         />
         <Kpi
           icon="◆"
-          label="Geschatte brutowinst"
-          value={euro(p.totalRevenue - p.costTotal)}
-          sub="omzet min kosten"
+          label="Brutowinst na btw"
+          value={euro(p.grossProfit)}
+          sub={`na ${euro(p.vatDue)} btw en kosten`}
+          onClick={() => p.go("rapportages")}
+        />
+        <Kpi
+          icon="%"
+          label="Geschatte inkomstenbelasting"
+          value={euro(p.incomeTax)}
+          sub={`${p.incomeTaxRate}% over positieve brutowinst`}
+          onClick={() => p.go("instellingen")}
+        />
+        <Kpi
+          icon="◇"
+          label="Geschatte nettowinst"
+          value={euro(p.netProfit)}
+          sub="na btw, kosten en inkomstenbelasting"
           onClick={() => p.go("rapportages")}
         />
         <Kpi
@@ -1533,7 +1568,6 @@ function Costs(p: any) {
   );
 }
 function Reports(p: any) {
-  const profit = p.totalRevenue - p.costTotal;
   return (
     <>
       <PageHead
@@ -1565,11 +1599,21 @@ function Reports(p: any) {
           <small>Inkoop en overige kosten</small>
         </div>
         <div className="hero-metric green">
-          <span>Geschatte brutowinst</span>
-          <b>{euro(profit)}</b>
+          <span>Brutowinst na btw</span>
+          <b>{euro(p.grossProfit)}</b>
           <small>
-            {p.totalRevenue?Math.round((profit / p.totalRevenue) * 100):0}% brutomarge
+            Omzet min {euro(p.vatDue)} btw en kosten
           </small>
+        </div>
+        <div className="hero-metric">
+          <span>Geschatte inkomstenbelasting</span>
+          <b>{euro(p.incomeTax)}</b>
+          <small>{p.incomeTaxRate}% over positieve brutowinst</small>
+        </div>
+        <div className="hero-metric green">
+          <span>Geschatte nettowinst</span>
+          <b>{euro(p.netProfit)}</b>
+          <small>Na btw, kosten en inkomstenbelasting</small>
         </div>
       </div>
       <div className="grid-2">
@@ -1599,7 +1643,7 @@ function Reports(p: any) {
     </>
   );
 }
-function Settings({ notify }: any) {
+function Settings({ notify, incomeTaxRate, setIncomeTaxRate }: any) {
   const [activeSection, setActiveSection] = useState("Bedrijfsgegevens");
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyMessage, setPasskeyMessage] = useState("");
@@ -1628,7 +1672,7 @@ function Settings({ notify }: any) {
       />
       <div className="settings-layout">
         <div className="settings-nav">
-          {["Bedrijfsgegevens", "Facturatie", "Nummering", "Documentteksten", "Back-up & export", "Wijzigingslogboek"].map((section) => (
+          {["Bedrijfsgegevens", "Facturatie", "Belastingen", "Nummering", "Documentteksten", "Back-up & export", "Wijzigingslogboek"].map((section) => (
             <button key={section} type="button" className={activeSection === section ? "active" : ""} onClick={() => setActiveSection(section)}>{section}</button>
           ))}
         </div>
@@ -1692,7 +1736,7 @@ function Settings({ notify }: any) {
             Tekst voor factuur zonder btw
             <textarea defaultValue="Op deze factuur wordt geen btw berekend." />
           </label>
-          </> : activeSection === "Facturatie" ? <div className="form-grid"><label>Standaard betaaltermijn<select defaultValue="14"><option>7 dagen</option><option value="14">14 dagen</option><option>30 dagen</option></select></label><label className="toggle-label">Btw berekenen <input type="checkbox" defaultChecked /><span className="toggle" /></label></div> : activeSection === "Nummering" ? <div className="form-grid"><label>Voorvoegsel facturen<input defaultValue="FAC" /></label><label>Volgend factuurnummer<input type="number" min="1" defaultValue="1" /></label></div> : activeSection === "Documentteksten" ? <label>Standaardtekst onder facturen<textarea defaultValue="Bedankt voor je aankoop." /></label> : activeSection === "Back-up & export" ? <div className="settings-placeholder"><p>Download een kopie van je administratie.</p><button type="button" className="secondary" onClick={() => notify("Volledige back-up gedownload")}>⇩ Back-up maken</button></div> : <div className="settings-placeholder"><p>Nog geen wijzigingen geregistreerd.</p></div>}
+          </> : activeSection === "Facturatie" ? <div className="form-grid"><label>Standaard betaaltermijn<select defaultValue="14"><option>7 dagen</option><option value="14">14 dagen</option><option>30 dagen</option></select></label><label className="toggle-label">Btw berekenen <input type="checkbox" defaultChecked /><span className="toggle" /></label></div> : activeSection === "Belastingen" ? <div className="form-grid"><label>Btw-tarief<select value="21" disabled><option value="21">21%</option></select><small className="field-help">De btw wordt uit de factuurbedragen inclusief btw gehaald.</small></label><label>Geschat inkomstenbelastingpercentage *<input type="number" min="0" max="100" step="0.1" value={incomeTaxRate} onChange={(event) => setIncomeTaxRate(Number(event.target.value))} /><small className="field-help">Wordt alleen berekend wanneer de brutowinst positief is.</small></label></div> : activeSection === "Nummering" ? <div className="form-grid"><label>Voorvoegsel facturen<input defaultValue="FAC" /></label><label>Volgend factuurnummer<input type="number" min="1" defaultValue="1" /></label></div> : activeSection === "Documentteksten" ? <label>Standaardtekst onder facturen<textarea defaultValue="Bedankt voor je aankoop." /></label> : activeSection === "Back-up & export" ? <div className="settings-placeholder"><p>Download een kopie van je administratie.</p><button type="button" className="secondary" onClick={() => notify("Volledige back-up gedownload")}>⇩ Back-up maken</button></div> : <div className="settings-placeholder"><p>Nog geen wijzigingen geregistreerd.</p></div>}
           <section className="security-settings">
             <div>
               <h2>Passkeys</h2>
