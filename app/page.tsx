@@ -70,6 +70,13 @@ type ParsedInvoice = {
     unitCost: number;
   }>;
 };
+type SaleLine = {
+  id: number;
+  productId: number;
+  quantity: number;
+  total: number;
+  colors: string;
+};
 type Invoice = {
   id: number;
   number: string;
@@ -1719,15 +1726,17 @@ function Modal(p: any) {
   const [costOriginal, setCostOriginal] = useState(0);
   const [costRate, setCostRate] = useState(1);
   const [saleCustomerId, setSaleCustomerId] = useState(String(p.selected?.id || "new"));
-  const [saleProductId, setSaleProductId] = useState(Number(p.products?.[0]?.id || 0));
-  const [saleQuantity, setSaleQuantity] = useState(1);
-  const [saleTotal, setSaleTotal] = useState(() => {
+  const initialSaleTotal = () => {
     const product = p.products?.[0] as Product | undefined;
     if (!product) return 0;
     return product.priceIncludesVat === false
       ? Math.round(product.price * (1 + (product.vatRate ?? 21) / 100) * 100) / 100
       : product.price;
-  });
+  };
+  const [saleLines, setSaleLines] = useState<SaleLine[]>([{
+    id: Date.now(), productId: Number(p.products?.[0]?.id || 0), quantity: 1,
+    total: initialSaleTotal(), colors: "",
+  }]);
   const type = p.type.split(":")[0];
   const recordId = Number(p.type.split(":")[1]);
   const close = p.close;
@@ -1756,31 +1765,45 @@ function Modal(p: any) {
         nextFollow: "",
         note: "",
       };
-      const product = p.products.find((item: Product) => item.id === saleProductId);
-      const quantity = Math.max(1, Math.floor(Number(f.get("quantity"))));
-      if (!product || (product.stock !== 999 && product.stock < quantity)) {
+      const requestedByProduct = saleLines.reduce((totals, line) => {
+        totals.set(line.productId, (totals.get(line.productId) || 0) + line.quantity);
+        return totals;
+      }, new Map<number, number>());
+      const invalid = saleLines.length === 0 || saleLines.some((line) => {
+        const product = p.products.find((item: Product) => item.id === line.productId);
+        return !product || line.quantity < 1 || line.total < 0;
+      }) || Array.from(requestedByProduct).some(([productId, quantity]) => {
+        const product = p.products.find((item: Product) => item.id === productId);
+        return !product || (product.stock !== 999 && product.stock < quantity);
+      });
+      if (invalid) {
         p.notify("Onvoldoende voorraad voor deze verkoop");
         return;
       }
-      const vatRate = product.vatRate ?? 21;
-      const total = Math.round(Math.max(0, Number(f.get("saleTotal"))) * 100) / 100;
-      const unitPriceInclVat = Math.round((total / quantity) * 100) / 100;
-      const subtotal = Math.round((total / (1 + vatRate / 100)) * 100) / 100;
+      const lines = saleLines.map((line) => {
+        const product = p.products.find((item: Product) => item.id === line.productId) as Product;
+        return { productId: product.id, description: line.colors.trim() ? `${product.name} — ${line.colors.trim()}` : product.name, quantity: line.quantity, unitPrice: Math.round((line.total / line.quantity) * 100) / 100, total: Math.round(line.total * 100) / 100 };
+      });
+      const total = Math.round(saleLines.reduce((sum, line) => sum + line.total, 0) * 100) / 100;
+      const subtotal = Math.round(saleLines.reduce((sum, line) => {
+        const product = p.products.find((item: Product) => item.id === line.productId) as Product;
+        return sum + line.total / (1 + (product.vatRate ?? 21) / 100);
+      }, 0) * 100) / 100;
       const vatAmount = Math.round((total - subtotal) * 100) / 100;
-      const colorNote = String(f.get("colors") || "").trim();
+      const vatRate = p.products.find((item: Product) => item.id === saleLines[0].productId)?.vatRate ?? 21;
       const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(p.invoices.length + 1).padStart(4, "0")}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14);
       const invoice: Invoice = {
         id: Date.now(), number: invoiceNumber, customer: customer.company, customerEmail: customer.email,
         date: today, due: dueDate.toISOString().slice(0, 10), total, subtotal, vatAmount, vatRate, paid: 0, status: "Verzonden",
-        lines: [{ productId: product.id, description: colorNote ? `${product.name} — ${colorNote}` : product.name, quantity, unitPrice: unitPriceInclVat, total }],
+        lines,
       };
       p.setInvoices((current: Invoice[]) => [invoice, ...current]);
-      p.setProducts((current: Product[]) => current.map((item) => item.id === product.id && item.stock !== 999 ? {
+      p.setProducts((current: Product[]) => current.map((item) => requestedByProduct.has(item.id) && item.stock !== 999 ? {
         ...item,
-        stock: item.stock - quantity,
-        stockHistory: [...(item.stockHistory || []), { id: Date.now(), date: today, type: "afboeking", quantity, reason: `Verkoop ${invoiceNumber}` }],
+        stock: item.stock - (requestedByProduct.get(item.id) || 0),
+        stockHistory: [...(item.stockHistory || []), { id: Date.now() + item.id, date: today, type: "afboeking", quantity: requestedByProduct.get(item.id) || 0, reason: `Verkoop ${invoiceNumber}` }],
       } : item));
       p.setCustomers((current: Customer[]) => {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
@@ -2183,14 +2206,18 @@ function Modal(p: any) {
               <label className="full">Klant<select value={saleCustomerId} onChange={(event) => setSaleCustomerId(event.target.value)}><option value="new">＋ Nieuwe klant</option>{p.customers.map((customer: Customer) => <option key={customer.id} value={customer.id}>{customer.company}</option>)}</select></label>
               {saleCustomerId === "new" && <><label>Bedrijfsnaam of naam *<input name="company" required autoFocus /></label><label>Contactpersoon<input name="contact" /></label><label>E-mailadres *<input name="email" type="email" required /></label><label>Telefoonnummer<input name="phone" /></label><label>Plaats<input name="city" /></label></>}
             </div>
-            <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Kies het product en vul zelf de afgesproken totaalprijs in.</small></div></div>
-            <div className="form-grid">
-              <label>Product *<select value={saleProductId} onChange={(event) => { const nextId = Number(event.target.value); const product = p.products.find((item: Product) => item.id === nextId); setSaleProductId(nextId); if (product) { const unitPrice = product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price; setSaleTotal(Math.round(unitPrice * saleQuantity * 100) / 100); } }} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
-              <label>Aantal *<input name="quantity" type="number" min="1" value={saleQuantity} onChange={(event) => { const quantity = Math.max(1, Math.floor(Number(event.target.value))); const product = p.products.find((item: Product) => item.id === saleProductId); setSaleQuantity(quantity); if (product) { const unitPrice = product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price; setSaleTotal(Math.round(unitPrice * quantity * 100) / 100); } }} required /></label>
-              <label>Handmatige totaalprijs incl. btw *<input name="saleTotal" type="number" min="0" step=".01" value={saleTotal} onChange={(event) => setSaleTotal(Number(event.target.value))} required /><small className="field-help">Voor alle stuks samen, ongeacht de kleur.</small></label>
-              <label>Kleuren / verdeling<input name="colors" placeholder="Bijv. 2 zwart, 1 wit (optioneel)" /></label>
-            </div>
-            <div className="calc-preview"><span>Handmatig totaal</span><b>{euro(saleTotal)}</b><span>Gemiddeld per stuk</span><b>{euro(saleQuantity > 0 ? saleTotal / saleQuantity : 0)}</b></div>
+            <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Voeg voor elk product, soort of kleur een eigen regel toe.</small></div></div>
+            {saleLines.map((line, index) => <div className="sale-line" key={line.id}>
+              <div className="sale-line-heading"><b>Productregel {index + 1}</b>{saleLines.length > 1 && <button type="button" className="sale-line-remove" onClick={() => setSaleLines((current) => current.filter((item) => item.id !== line.id))}>Verwijderen</button>}</div>
+              <div className="form-grid">
+                <label>Product *<select value={line.productId} onChange={(event) => { const productId = Number(event.target.value); const product = p.products.find((item: Product) => item.id === productId); setSaleLines((current) => current.map((item) => item.id === line.id ? { ...item, productId, total: product ? Math.round((product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price) * item.quantity * 100) / 100 : 0 } : item)); }} required>{p.products.map((product: Product) => <option key={product.id} value={product.id}>{product.name} · {product.stock === 999 ? "onbeperkt" : `${product.stock} op voorraad`}</option>)}</select></label>
+                <label>Aantal *<input type="number" min="1" value={line.quantity} onChange={(event) => { const quantity = Math.max(1, Math.floor(Number(event.target.value))); const product = p.products.find((item: Product) => item.id === line.productId); setSaleLines((current) => current.map((item) => item.id === line.id ? { ...item, quantity, total: product ? Math.round((product.priceIncludesVat === false ? product.price * (1 + (product.vatRate ?? 21) / 100) : product.price) * quantity * 100) / 100 : item.total } : item)); }} required /></label>
+                <label>Handmatige totaalprijs incl. btw *<input type="number" min="0" step=".01" value={line.total} onChange={(event) => setSaleLines((current) => current.map((item) => item.id === line.id ? { ...item, total: Number(event.target.value) } : item))} required /><small className="field-help">Voor alle stuks op deze regel.</small></label>
+                <label>Kleuren / verdeling<input value={line.colors} onChange={(event) => setSaleLines((current) => current.map((item) => item.id === line.id ? { ...item, colors: event.target.value } : item))} placeholder="Bijv. 2 zwart, 1 wit (optioneel)" /></label>
+              </div>
+            </div>)}
+            <button type="button" className="secondary add-sale-line" onClick={() => setSaleLines((current) => [...current, { id: Date.now(), productId: Number(p.products?.[0]?.id || 0), quantity: 1, total: initialSaleTotal(), colors: "" }])}>＋ Productregel toevoegen</button>
+            <div className="calc-preview"><span>Totaal verkoop</span><b>{euro(saleLines.reduce((sum, line) => sum + line.total, 0))}</b><span>Totaal aantal</span><b>{saleLines.reduce((sum, line) => sum + line.quantity, 0)}</b></div>
             <div className="privacy-note">Na opslaan wordt de factuur aangemaakt, de voorraad afgeboekt en een verzendklare e-mail geopend.</div>
           </>
         )}
