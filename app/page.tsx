@@ -157,6 +157,27 @@ const nextInvoiceNumber = (invoices: Invoice[], year = new Date().getFullYear())
   return `${prefix}${String(sequence).padStart(4, "0")}`;
 };
 
+const restoreOrphanedInvoiceStock = (products: Product[], invoices: Invoice[]) => {
+  const existingInvoiceNumbers = new Set(invoices.map((invoice) => invoice.number));
+  let restoredQuantity = 0;
+  const repairedProducts = products.map((product) => {
+    const orphanedMovements = (product.stockHistory || []).filter((movement) => {
+      if (movement.type !== "afboeking" || !movement.reason?.startsWith("Verkoop FAC-")) return false;
+      return !existingInvoiceNumbers.has(movement.reason.slice("Verkoop ".length));
+    });
+    if (orphanedMovements.length === 0) return product;
+    const quantity = orphanedMovements.reduce((sum, movement) => sum + movement.quantity, 0);
+    restoredQuantity += quantity;
+    const orphanedIds = new Set(orphanedMovements.map((movement) => movement.id));
+    return {
+      ...product,
+      stock: product.stock === 999 ? 999 : product.stock + quantity,
+      stockHistory: (product.stockHistory || []).filter((movement) => !orphanedIds.has(movement.id)),
+    };
+  });
+  return { products: repairedProducts, restoredQuantity };
+};
+
 const nav = [
   ["dashboard", "▦", "Dashboard"],
   ["klanten", "♙", "Klanten"],
@@ -346,6 +367,7 @@ export default function Home() {
         return;
       }
       if (data) {
+        const loadedInvoices: Invoice[] = data.invoices || [];
         const loadedPurchaseInvoices: PurchaseInvoice[] = data.purchase_invoices || [];
         const loadedProducts: Product[] = data.products || [];
         const repairedProducts = loadedProducts.map((product) => {
@@ -362,6 +384,16 @@ export default function Home() {
           const calculatedStock = Math.max(0, incoming - outgoing);
           return calculatedStock > 0 ? { ...product, stock: calculatedStock } : product;
         });
+        const stockRepair = restoreOrphanedInvoiceStock(repairedProducts, loadedInvoices);
+        if (stockRepair.restoredQuantity > 0) {
+          const { error: repairError } = await supabase
+            .from("crm_state")
+            .update({ products: stockRepair.products, updated_at: new Date().toISOString() })
+            .eq("user_id", userId);
+          if (!active) return;
+          if (repairError) setSyncStatus("fout");
+          else setToast(`${stockRepair.restoredQuantity} voorraadstuks van verwijderde facturen hersteld`);
+        }
         const loadedCosts: Cost[] = data.costs || [];
         const restoredInvoiceCosts: Cost[] = loadedPurchaseInvoices
           .filter(
@@ -383,8 +415,8 @@ export default function Home() {
             sourceInvoiceId: invoice.id,
           }));
         setCustomers(data.customers || []);
-        setProducts(repairedProducts);
-        setInvoices(data.invoices || []);
+        setProducts(stockRepair.products);
+        setInvoices(loadedInvoices);
         setPurchaseInvoices(loadedPurchaseInvoices);
         setQuotes(data.quotes || []);
         setCosts([...restoredInvoiceCosts, ...loadedCosts]);
@@ -502,7 +534,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify, userId }} />
+      <Invoices {...{ invoices, setInvoices, products, setProducts, customers, query, setModal, notify, userId }} />
     ) : view === "inkoopfacturen" ? (
       <PurchaseInvoices {...{ purchaseInvoices, setPurchaseInvoices, products, setProducts, setCosts, query, setModal, notify }} />
     ) : view === "betalingen" ? (
@@ -1308,18 +1340,42 @@ function Invoices(p: any) {
   const removeInvoice = async (invoice: Invoice) => {
     if (!window.confirm(`Weet je zeker dat je ${invoice.number} wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.`)) return;
     const previous = p.invoices as Invoice[];
+    const previousProducts = p.products as Product[];
     const next = previous.filter((item) => item.id !== invoice.id);
+    let restoredQuantity = 0;
+    const nextProducts = previousProducts.map((product) => {
+      const matchingMovements = (product.stockHistory || []).filter(
+        (movement) =>
+          movement.type === "afboeking" &&
+          (movement.sourceInvoiceId === invoice.id || movement.reason === `Verkoop ${invoice.number}`),
+      );
+      const recordedQuantity = matchingMovements.reduce((sum, movement) => sum + movement.quantity, 0);
+      const lineQuantity = (invoice.lines || [])
+        .filter((line) => line.productId === product.id)
+        .reduce((sum, line) => sum + line.quantity, 0);
+      const quantity = recordedQuantity || lineQuantity;
+      if (quantity === 0) return product;
+      restoredQuantity += quantity;
+      const matchingIds = new Set(matchingMovements.map((movement) => movement.id));
+      return {
+        ...product,
+        stock: product.stock === 999 ? 999 : product.stock + quantity,
+        stockHistory: (product.stockHistory || []).filter((movement) => !matchingIds.has(movement.id)),
+      };
+    });
     p.setInvoices(next);
+    p.setProducts(nextProducts);
     const { error } = await supabase
       .from("crm_state")
-      .update({ invoices: next, updated_at: new Date().toISOString() })
+      .update({ invoices: next, products: nextProducts, updated_at: new Date().toISOString() })
       .eq("user_id", p.userId);
     if (error) {
       p.setInvoices(previous);
+      p.setProducts(previousProducts);
       p.notify("Factuur verwijderen is niet gelukt. Probeer het opnieuw.");
       return;
     }
-    p.notify(`${invoice.number} verwijderd`);
+    p.notify(`${invoice.number} verwijderd${restoredQuantity ? ` — ${restoredQuantity} voorraadstuks teruggeboekt` : ""}`);
   };
   return (
     <>
@@ -1884,7 +1940,7 @@ function Modal(p: any) {
       p.setProducts((current: Product[]) => current.map((item) => requestedByProduct.has(item.id) && item.stock !== 999 ? {
         ...item,
         stock: item.stock - (requestedByProduct.get(item.id) || 0),
-        stockHistory: [...(item.stockHistory || []), { id: Date.now() + item.id, date: today, type: "afboeking", quantity: requestedByProduct.get(item.id) || 0, reason: `Verkoop ${invoiceNumber}` }],
+        stockHistory: [...(item.stockHistory || []), { id: Date.now() + item.id, date: today, type: "afboeking", quantity: requestedByProduct.get(item.id) || 0, reason: `Verkoop ${invoiceNumber}`, sourceInvoiceId: invoice.id }],
       } : item));
       p.setCustomers((current: Customer[]) => {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
