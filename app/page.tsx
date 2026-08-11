@@ -530,7 +530,7 @@ export default function Home() {
     ) : view === "verkoop" ? (
       <Sales {...{ customers, setCustomers, setSelected, setModal, quotes }} />
     ) : view === "producten" ? (
-      <Products {...{ products, setProducts, query, setModal, notify }} />
+      <Products {...{ products, setProducts, purchaseInvoices, query, setModal, notify }} />
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
@@ -1165,7 +1165,7 @@ function Products(p: any) {
       </div>
       <div className="inventory">
         <div>
-          <small>INKOOPWAARDE VOORRAAD</small>
+          <small>HUIDIGE VOORRAADWAARDE</small>
           <b>
             {euro(
               p.products.reduce(
@@ -1175,6 +1175,20 @@ function Products(p: any) {
               ),
             )}
           </b>
+          <span>Na verkopen en voorraadcorrecties</span>
+        </div>
+        <div>
+          <small>TOTAAL INKOOPFACTUREN</small>
+          <b>
+            {euro(
+              p.purchaseInvoices.reduce(
+                (total: number, invoice: PurchaseInvoice) =>
+                  total + (invoice.currency === "EUR" ? invoice.total : 0),
+                0,
+              ),
+            )}
+          </b>
+          <span>Alle opgeslagen EUR-inkopen</span>
         </div>
         <div>
           <small>VERWACHTE VERKOOPWAARDE</small>
@@ -1255,7 +1269,7 @@ function Products(p: any) {
                   − Afboeken
                 </button>
               </div>
-              <button className="edit-price-button" onClick={() => p.setModal(`product-price:${x.id}`)}>Product en prijs bewerken</button>
+              <button className="edit-price-button" onClick={() => p.setModal(`product-price:${x.id}`)}>Product, prijs en voorraad bewerken</button>
             </div>
           </div>
         ))}
@@ -2050,8 +2064,33 @@ function Modal(p: any) {
       const price = Math.max(0, Number(f.get("price")));
       const name = String(f.get("name")).trim();
       const priceIncludesVat = f.get("priceIncludesVat") === "on";
-      p.setProducts((current: Product[]) => current.map((product) => product.id === recordId ? { ...product, name, price, priceIncludesVat, vatRate: 21 } : product));
-      p.notify(`${name} bijgewerkt — ${euro(price)} ${priceIncludesVat ? "incl." : "excl."} btw`);
+      const requestedStock = Math.max(0, Math.floor(Number(f.get("stock"))));
+      p.setProducts((current: Product[]) => current.map((product) => {
+        if (product.id !== recordId) return product;
+        const stockChanged = product.stock !== 999 && product.stock !== requestedStock;
+        const difference = stockChanged ? requestedStock - product.stock : 0;
+        return {
+          ...product,
+          name,
+          price,
+          priceIncludesVat,
+          vatRate: 21,
+          stock: product.stock === 999 ? 999 : requestedStock,
+          stockHistory: stockChanged
+            ? [
+                ...(product.stockHistory || []),
+                {
+                  id: Date.now(),
+                  date: today,
+                  type: difference > 0 ? "inkoop" : "afboeking",
+                  quantity: Math.abs(difference),
+                  reason: "Handmatige voorraadcorrectie",
+                },
+              ]
+            : product.stockHistory,
+        };
+      }));
+      p.notify(`${name} bijgewerkt — voorraad ingesteld op ${requestedStock} stuks`);
     }
     if (type === "cost") {
       p.setCosts((a: Cost[]) => [
@@ -2480,8 +2519,9 @@ function Modal(p: any) {
           <div className="form-grid">
             <label className="full">Productnaam *<input name="name" defaultValue={p.products.find((product: Product) => product.id === recordId)?.name || ""} required autoFocus /></label>
             <label>Verkoopprijs per stuk *<input name="price" type="number" min="0" step=".01" defaultValue={p.products.find((product: Product) => product.id === recordId)?.price || 0} required /></label>
+            <label>Voorraad handmatig instellen *<input name="stock" type="number" min="0" step="1" defaultValue={p.products.find((product: Product) => product.id === recordId)?.stock === 999 ? 0 : p.products.find((product: Product) => product.id === recordId)?.stock || 0} disabled={p.products.find((product: Product) => product.id === recordId)?.stock === 999} required /></label>
             <label className="toggle-label">Prijs is incl. btw<input name="priceIncludesVat" type="checkbox" defaultChecked={p.products.find((product: Product) => product.id === recordId)?.priceIncludesVat !== false} /><span className="toggle" /></label>
-            <div className="privacy-note full">Op verkoopfacturen wordt altijd 21% btw apart vermeld.</div>
+            <div className="privacy-note full">Een handmatige voorraadwijziging wordt opgeslagen als voorraadcorrectie. Op verkoopfacturen wordt altijd 21% btw apart vermeld.</div>
           </div>
         )}
         {type === "cost" && (
