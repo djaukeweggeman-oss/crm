@@ -912,24 +912,33 @@ td small {
   font-size: 9px;
   color: #8a948f;
 }
-.margin {
+.margin,
+.stock-level {
   margin-top: 12px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 4px;
   font-size: 10px;
 }
-.margin > i {
+.margin > i,
+.stock-level > i {
   grid-column: 1/3;
   height: 4px;
   background: #e7ece9;
   border-radius: 3px;
 }
-.margin em {
+.margin em,
+.stock-level em {
   display: block;
   height: 100%;
   background: #6eaa99;
   border-radius: 3px;
+}
+.stock-level {
+  margin-top: 9px;
+}
+.stock-level.low em {
+  background: #c96b5f;
 }
 .stock {
   margin: 15px -15px 0;

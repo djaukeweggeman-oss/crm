@@ -157,6 +157,12 @@ const nextInvoiceNumber = (invoices: Invoice[], year = new Date().getFullYear())
   return `${prefix}${String(sequence).padStart(4, "0")}`;
 };
 
+const stockReference = (product: Product) =>
+  Math.max(product.stock === 999 ? 0 : product.stock, product.lastPurchaseQty || 0, product.min || 0, 1);
+
+const stockPercentage = (product: Product) =>
+  product.stock === 999 ? 100 : Math.min(100, (product.stock / stockReference(product)) * 100);
+
 const restoreOrphanedInvoiceStock = (products: Product[], invoices: Invoice[]) => {
   const existingInvoiceNumbers = new Set(invoices.map((invoice) => invoice.number));
   let restoredQuantity = 0;
@@ -1254,6 +1260,19 @@ function Products(p: any) {
                       width: `${Math.max(0, Math.min(100, x.price ? ((x.price - x.cost) / x.price) * 100 : 0))}%`,
                     }}
                   />
+                </i>
+              </div>
+              <div className={`stock-level ${x.stock < x.min ? "low" : ""}`}>
+                <span>Voorraadniveau</span>
+                <b>{x.stock === 999 ? "Onbeperkt" : `${x.stock} / ${stockReference(x)} stuks`}</b>
+                <i
+                  role="progressbar"
+                  aria-label={`Voorraadniveau van ${x.name}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(stockPercentage(x))}
+                >
+                  <em style={{ width: `${stockPercentage(x)}%` }} />
                 </i>
               </div>
               <div className={`stock ${x.stock < x.min ? "low" : ""}`}>
