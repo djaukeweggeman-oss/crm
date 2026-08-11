@@ -144,6 +144,19 @@ const seedInvoices: Invoice[] = [];
 const seedQuotes: Quote[] = [];
 const seedCosts: Cost[] = [];
 
+const nextInvoiceNumber = (invoices: Invoice[], year = new Date().getFullYear()) => {
+  const prefix = `FAC-${year}-`;
+  const usedNumbers = new Set(
+    invoices
+      .filter((invoice) => invoice.number.startsWith(prefix))
+      .map((invoice) => Number(invoice.number.slice(prefix.length)))
+      .filter(Number.isInteger),
+  );
+  let sequence = 1;
+  while (usedNumbers.has(sequence)) sequence += 1;
+  return `${prefix}${String(sequence).padStart(4, "0")}`;
+};
+
 const nav = [
   ["dashboard", "▦", "Dashboard"],
   ["klanten", "♙", "Klanten"],
@@ -489,7 +502,7 @@ export default function Home() {
     ) : view === "offertes" ? (
       <Quotes {...{ quotes, setQuotes, query, setModal, notify, go }} />
     ) : view === "facturen" ? (
-      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify }} />
+      <Invoices {...{ invoices, setInvoices, customers, query, setModal, notify, userId }} />
     ) : view === "inkoopfacturen" ? (
       <PurchaseInvoices {...{ purchaseInvoices, setPurchaseInvoices, products, setProducts, setCosts, query, setModal, notify }} />
     ) : view === "betalingen" ? (
@@ -1259,7 +1272,7 @@ function Quotes(p: any) {
                   ...a,
                   {
                     id: Date.now(),
-                    number: `FAC-2026-${String(43 + a.length).padStart(4, "0")}`,
+                    number: nextInvoiceNumber(a),
                     customer: q.customer,
                     date: today,
                     due: "2026-08-08",
@@ -1292,6 +1305,22 @@ function Invoices(p: any) {
       s.toLowerCase().includes(p.query.toLowerCase()),
     ),
   );
+  const removeInvoice = async (invoice: Invoice) => {
+    if (!window.confirm(`Weet je zeker dat je ${invoice.number} wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.`)) return;
+    const previous = p.invoices as Invoice[];
+    const next = previous.filter((item) => item.id !== invoice.id);
+    p.setInvoices(next);
+    const { error } = await supabase
+      .from("crm_state")
+      .update({ invoices: next, updated_at: new Date().toISOString() })
+      .eq("user_id", p.userId);
+    if (error) {
+      p.setInvoices(previous);
+      p.notify("Factuur verwijderen is niet gelukt. Probeer het opnieuw.");
+      return;
+    }
+    p.notify(`${invoice.number} verwijderd`);
+  };
   return (
     <>
       <PageHead
@@ -1343,6 +1372,14 @@ function Invoices(p: any) {
               }
             >
               E-mail
+            </button>
+            <button
+              type="button"
+              className="delete-action"
+              aria-label={`${i.number} verwijderen`}
+              onClick={() => void removeInvoice(i)}
+            >
+              Verwijderen
             </button>
           </>
         )}
@@ -1835,7 +1872,7 @@ function Modal(p: any) {
       }, 0) * 100) / 100;
       const vatAmount = Math.round((total - subtotal) * 100) / 100;
       const vatRate = p.products.find((item: Product) => item.id === saleLines[0].productId)?.vatRate ?? 21;
-      const invoiceNumber = `FAC-${new Date().getFullYear()}-${String(p.invoices.length + 1).padStart(4, "0")}`;
+      const invoiceNumber = nextInvoiceNumber(p.invoices);
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14);
       const invoice: Invoice = {
@@ -2015,11 +2052,11 @@ function Modal(p: any) {
         ]);
         p.notify("Offerte als concept opgeslagen");
       } else {
-        const n = p.invoices.length + 43;
+        const invoiceNumber = nextInvoiceNumber(p.invoices);
         p.setInvoices((a: Invoice[]) => [
           {
             id: Date.now(),
-            number: `FAC-2026-${String(n).padStart(4, "0")}`,
+            number: invoiceNumber,
             customer,
             date: today,
             due: String(f.get("due")),
@@ -2040,7 +2077,7 @@ function Modal(p: any) {
                 : x,
             ),
           );
-        p.notify("Factuur aangemaakt en voorraad bijgewerkt");
+        p.notify(`${invoiceNumber} aangemaakt en voorraad bijgewerkt`);
       }
     }
     if (type === "contact") {

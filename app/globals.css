@@ -998,6 +998,15 @@ td small {
   border-radius: 5px;
   padding: 6px 8px;
 }
+.row-actions .delete-action {
+  color: #a33a32;
+  border-color: #e7c9c5;
+  background: #fffafa;
+}
+.row-actions .delete-action:hover {
+  background: #fff1ef;
+  border-color: #d9aaa4;
+}
 .hero-metric {
   padding: 21px;
 }
