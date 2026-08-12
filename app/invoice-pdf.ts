@@ -4,7 +4,8 @@ export type InvoicePdfData = {
   number: string;
   date: string;
   due: string;
-  customer: { company: string; contact?: string; email?: string; city?: string };
+  deliveryDate: string;
+  customer: { company: string; contact?: string; email?: string; address: string };
   lines: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
   total: number;
   subtotal?: number;
@@ -54,13 +55,13 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   page.drawText("FACTUUR AAN", { x: left, y: 735, size: 8, font: bold, color: green });
   page.drawText(data.customer.company, { x: left, y: 715, size: 12, font: bold, color: ink });
   let customerY = 699;
-  for (const value of [data.customer.contact, data.customer.city, data.customer.email].filter(Boolean) as string[]) {
+  for (const value of [data.customer.contact, ...data.customer.address.split("\n"), data.customer.email].filter(Boolean) as string[]) {
     page.drawText(value, { x: left, y: customerY, size: 9, font: regular, color: muted });
     customerY -= 14;
   }
 
   const metaX = 350;
-  [["Factuurnummer", data.number], ["Factuurdatum", data.date], ["Vervaldatum", data.due]].forEach(([label, value], index) => {
+  [["Factuurnummer", data.number], ["Factuurdatum", data.date], ["Leverdatum", data.deliveryDate], ["Vervaldatum", data.due]].forEach(([label, value], index) => {
     const y = 735 - index * 24;
     page.drawText(label, { x: metaX, y, size: 8, font: bold, color: muted });
     page.drawText(value, { x: 440, y, size: 9, font: regular, color: ink });
@@ -70,7 +71,7 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   page.drawRectangle({ x: left, y: tableTop, width: right - left, height: 28, color: pale });
   page.drawText("OMSCHRIJVING", { x: left + 10, y: tableTop + 10, size: 8, font: bold, color: green });
   page.drawText("AANTAL", { x: 377, y: tableTop + 10, size: 8, font: bold, color: green });
-  page.drawText("PRIJS INCL.", { x: 422, y: tableTop + 10, size: 8, font: bold, color: green });
+  page.drawText("PRIJS EXCL.", { x: 422, y: tableTop + 10, size: 8, font: bold, color: green });
   page.drawText("TOTAAL", { x: 500, y: tableTop + 10, size: 8, font: bold, color: green });
 
   let rowY = tableTop - 24;
@@ -78,8 +79,10 @@ export async function createInvoicePdf(data: InvoicePdfData) {
     const descriptionLines = wrap(item.description, 52).slice(0, 3);
     descriptionLines.forEach((text, index) => page.drawText(text, { x: left + 10, y: rowY - index * 12, size: 9, font: index === 0 ? bold : regular, color: ink }));
     page.drawText(String(item.quantity), { x: 388, y: rowY, size: 9, font: regular, color: ink });
-    page.drawText(money(item.unitPrice), { x: 425, y: rowY, size: 9, font: regular, color: ink });
-    drawAmountRight(money(item.total), rowY, 9, bold);
+    const unitPriceExVat = item.unitPrice / (1 + (data.vatRate ?? 21) / 100);
+    const totalExVat = item.total / (1 + (data.vatRate ?? 21) / 100);
+    page.drawText(money(unitPriceExVat), { x: 425, y: rowY, size: 9, font: regular, color: ink });
+    drawAmountRight(money(totalExVat), rowY, 9, bold);
     rowY -= Math.max(42, descriptionLines.length * 14 + 14);
     page.drawLine({ start: { x: left, y: rowY + 12 }, end: { x: right, y: rowY + 12 }, thickness: 0.7, color: line });
   }
@@ -101,7 +104,8 @@ export async function createInvoicePdf(data: InvoicePdfData) {
   page.drawText(`Betaal uiterlijk op ${data.due} onder vermelding van ${data.number}.`, { x: left + 14, y: 145, size: 9, font: regular, color: ink });
   page.drawText("Bedankt voor je aankoop.", { x: left + 14, y: 126, size: 9, font: regular, color: muted });
   page.drawText("WGMN Digital", { x: left, y: 55, size: 9, font: bold, color: green });
-  page.drawText("Auke@wgmndigital.nl", { x: left, y: 42, size: 8, font: regular, color: muted });
+  page.drawText("Zwaanstraat 26 · 6921 WN Duiven", { x: left, y: 42, size: 8, font: regular, color: muted });
+  page.drawText("BTW-id NL004677786B36 · KVK 88955125", { x: left, y: 29, size: 8, font: regular, color: muted });
   page.drawText("Digitale oplossingen, professioneel geleverd.", { x: 365, y: 55, size: 7, font: regular, color: muted });
 
   const bytes = await pdf.save();

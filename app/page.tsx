@@ -23,6 +23,8 @@ type Customer = {
   email: string;
   phone: string;
   city: string;
+  address?: string;
+  postalCode?: string;
   branch: string;
   status: string;
   revenue: number;
@@ -90,6 +92,8 @@ type Invoice = {
   subtotal?: number;
   vatAmount?: number;
   vatRate?: number;
+  deliveryDate?: string;
+  customerAddress?: string;
   lines?: Array<{ productId: number; description: string; quantity: number; unitPrice: number; total: number }>;
 };
 type PurchaseInvoice = {
@@ -137,6 +141,7 @@ const dateNL = (s: string) =>
     year: "numeric",
   }).format(new Date(s));
 const today = new Date().toISOString().slice(0, 10);
+const business = { name: "WGMN Digital", address: "Zwaanstraat 26\n6921 WN Duiven", vatId: "NL004677786B36", kvk: "88955125" };
 
 const seedCustomers: Customer[] = [];
 const seedProducts: Product[] = [];
@@ -145,16 +150,9 @@ const seedQuotes: Quote[] = [];
 const seedCosts: Cost[] = [];
 
 const nextInvoiceNumber = (invoices: Invoice[], year = new Date().getFullYear()) => {
-  const prefix = `FAC-${year}-`;
-  const usedNumbers = new Set(
-    invoices
-      .filter((invoice) => invoice.number.startsWith(prefix))
-      .map((invoice) => Number(invoice.number.slice(prefix.length)))
-      .filter(Number.isInteger),
-  );
-  let sequence = 1;
-  while (usedNumbers.has(sequence)) sequence += 1;
-  return `${prefix}${String(sequence).padStart(4, "0")}`;
+  const prefix = `${year}-`;
+  const highest = invoices.filter((invoice) => invoice.number.startsWith(prefix)).map((invoice) => Number(invoice.number.slice(prefix.length))).filter(Number.isInteger).reduce((max, number) => Math.max(max, number), 0);
+  return `${prefix}${String(highest + 1).padStart(3, "0")}`;
 };
 
 const stockReference = (product: Product) =>
@@ -1443,8 +1441,9 @@ function Invoices(p: any) {
           <>
             <button onClick={async () => {
               if (!i.lines?.length) return p.notify("Deze oudere factuur bevat nog geen productregels voor een PDF");
+              if (!i.customerAddress || !i.deliveryDate) return p.notify("Deze oudere factuur mist een volledig klantadres of leverdatum");
               const customer = p.customers.find((item: Customer) => item.company === i.customer);
-              const blob = await createInvoicePdf({ number: i.number, date: i.date, due: i.due, customer: { company: i.customer, contact: customer?.contact, email: i.customerEmail || customer?.email, city: customer?.city }, lines: i.lines, total: i.total, subtotal: i.subtotal, vatAmount: i.vatAmount, vatRate: i.vatRate || 21 });
+              const blob = await createInvoicePdf({ number: i.number, date: i.date, due: i.due, deliveryDate: i.deliveryDate, customer: { company: i.customer, contact: customer?.contact, email: i.customerEmail || customer?.email, address: i.customerAddress }, lines: i.lines, total: i.total, subtotal: i.subtotal, vatAmount: i.vatAmount, vatRate: i.vatRate || 21 });
               downloadInvoicePdf(blob, i.number);
               p.notify(`${i.number}.pdf gedownload`);
             }}>
@@ -1815,19 +1814,19 @@ function Settings({ notify, incomeTaxRate, setIncomeTaxRate }: any) {
           <div className="form-grid">
             <label>
               Bedrijfsnaam
-              <input placeholder="Vul je bedrijfsnaam in" />
+              <input defaultValue={business.name} readOnly />
             </label>
             <label>
               Handelsnaam
-              <input placeholder="Vul je handelsnaam in" />
+              <input defaultValue={business.name} readOnly />
             </label>
             <label>
               Adres
-              <input placeholder="Straat en huisnummer" />
+              <input defaultValue="Zwaanstraat 26" readOnly />
             </label>
             <label>
               Postcode en plaats
-              <input placeholder="Postcode en plaats" />
+              <input defaultValue="6921 WN Duiven" readOnly />
             </label>
             <label>
               E-mailadres
@@ -1839,7 +1838,11 @@ function Settings({ notify, incomeTaxRate, setIncomeTaxRate }: any) {
             </label>
             <label>
               KvK-nummer
-              <input placeholder="KvK-nummer" />
+              <input defaultValue={business.kvk} readOnly />
+            </label>
+            <label>
+              Btw-identificatienummer
+              <input defaultValue={business.vatId} readOnly />
             </label>
             <label>
               IBAN
@@ -1920,6 +1923,8 @@ function Modal(p: any) {
     if (type === "sale") {
       const existingCustomer = p.customers.find((customer: Customer) => customer.id === Number(saleCustomerId));
       const customerId = existingCustomer?.id || Date.now();
+      const customerAddress = String(f.get("customerAddress")).trim();
+      const deliveryDate = String(f.get("deliveryDate"));
       const customer = existingCustomer || {
         id: customerId,
         company: String(f.get("company")),
@@ -1967,7 +1972,7 @@ function Modal(p: any) {
       const invoice: Invoice = {
         id: Date.now(), number: invoiceNumber, customer: customer.company, customerEmail: customer.email,
         date: today, due: dueDate.toISOString().slice(0, 10), total, subtotal, vatAmount, vatRate, paid: 0, status: "Verzonden",
-        lines,
+        lines, deliveryDate, customerAddress,
       };
       p.setInvoices((current: Invoice[]) => [invoice, ...current]);
       p.setProducts((current: Product[]) => current.map((item) => requestedByProduct.has(item.id) && item.stock !== 999 ? {
@@ -1979,7 +1984,7 @@ function Modal(p: any) {
         const updated = current.map((item) => item.id === customerId ? { ...item, revenue: item.revenue + total, purchases: item.purchases + 1, lastOrder: today, status: "Klant" } : item);
         return existingCustomer ? updated : [{ ...customer, revenue: total, purchases: 1, lastOrder: today }, ...updated];
       });
-      const pdf = await createInvoicePdf({ number: invoice.number, date: invoice.date, due: invoice.due, customer: { company: customer.company, contact: customer.contact, email: customer.email, city: customer.city }, lines: invoice.lines || [], total: invoice.total, subtotal, vatAmount, vatRate });
+      const pdf = await createInvoicePdf({ number: invoice.number, date: invoice.date, due: invoice.due, deliveryDate, customer: { company: customer.company, contact: customer.contact, email: customer.email, address: customerAddress }, lines: invoice.lines || [], total: invoice.total, subtotal, vatAmount, vatRate });
       downloadInvoicePdf(pdf, invoice.number);
       p.notify(`${invoiceNumber}.pdf aangemaakt en voorraad bijgewerkt`);
       if (customer.email) {
@@ -1998,6 +2003,8 @@ function Modal(p: any) {
           email: String(f.get("email")),
           phone: String(f.get("phone")),
           city: String(f.get("city")),
+          address: String(f.get("address")),
+          postalCode: String(f.get("postalCode")),
           branch: String(f.get("branch")),
           status: "Prospect",
           revenue: 0,
@@ -2370,8 +2377,16 @@ function Modal(p: any) {
               <input name="phone" />
             </label>
             <label>
-              Plaats
-              <input name="city" />
+              Straat en huisnummer *
+              <input name="address" required />
+            </label>
+            <label>
+              Postcode *
+              <input name="postalCode" required />
+            </label>
+            <label>
+              Plaats *
+              <input name="city" required />
             </label>
             <label>
               Branche
@@ -2399,7 +2414,9 @@ function Modal(p: any) {
             <div className="form-section-title"><span>1</span><div><b>Klantgegevens</b><small>Kies een klant of maak direct een nieuwe aan.</small></div></div>
             <div className="form-grid">
               <label className="full">Klant<select value={saleCustomerId} onChange={(event) => setSaleCustomerId(event.target.value)}><option value="new">＋ Nieuwe klant</option>{p.customers.map((customer: Customer) => <option key={customer.id} value={customer.id}>{customer.company}</option>)}</select></label>
-              {saleCustomerId === "new" && <><label>Bedrijfsnaam of naam *<input name="company" required autoFocus /></label><label>Contactpersoon<input name="contact" /></label><label>E-mailadres *<input name="email" type="email" required /></label><label>Telefoonnummer<input name="phone" /></label><label>Plaats<input name="city" /></label></>}
+              {saleCustomerId === "new" && <><label>Bedrijfsnaam of naam *<input name="company" required autoFocus /></label><label>Contactpersoon<input name="contact" /></label><label>E-mailadres *<input name="email" type="email" required /></label><label>Telefoonnummer<input name="phone" /></label></>}
+              <label className="full">Volledig factuuradres klant *<textarea key={saleCustomerId} name="customerAddress" required defaultValue={saleCustomerId === "new" ? "" : (() => { const customer = p.customers.find((item: Customer) => String(item.id) === saleCustomerId); return [customer?.address, [customer?.postalCode, customer?.city].filter(Boolean).join(" ")].filter(Boolean).join("\n"); })()} placeholder="Straat en huisnummer&#10;Postcode en plaats" /></label>
+              <label>Leverdatum *<input name="deliveryDate" type="date" defaultValue={today} required /></label>
             </div>
             <div className="form-section-title"><span>2</span><div><b>Verkoop</b><small>Voeg voor elk product, soort of kleur een eigen regel toe.</small></div></div>
             {saleLines.map((line, index) => <div className="sale-line" key={line.id}>
